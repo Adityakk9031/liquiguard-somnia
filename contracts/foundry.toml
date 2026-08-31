@@ -1,0 +1,18 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+test = "test"
+script = "script"
+solc_version = "0.8.24"
+optimizer = true
+optimizer_runs = 200
+evm_version = "cancun"
+via_ir = false
+
+[rpc_endpoints]
+somnia = "https://dream-rpc.somnia.network"
+localhost = "http://127.0.0.1:8545"
+
+[etherscan]
+somnia = { key = "none", url = "https://shannon-explorer.somnia.network/api" }

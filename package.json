@@ -1,0 +1,27 @@
+{
+  "name": "liquiguard-somnia",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LiquiGuard: DeFi micro-hedging vault on Somnia Shannon Testnet using DreamDEX Event Contracts",
+  "workspaces": [
+    "daemon",
+    "frontend"
+  ],
+  "scripts": {
+    "build:contracts": "cd contracts && forge build",
+    "test:contracts": "cd contracts && forge test -vvv",
+    "build:daemon": "cd daemon && npm run build",
+    "dev:daemon": "cd daemon && npm run dev",
+    "build:frontend": "cd frontend && npm run build",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev": "concurrently \"npm run dev:daemon\" \"npm run dev:frontend\"",
+    "build": "npm run build:contracts && npm run build:daemon && npm run build:frontend",
+    "test": "npm run test:contracts"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "dotenv": "^17.4.2",
+    "tsx": "^4.23.13",
+    "viem": "^2.56.1"
+  }
+}
