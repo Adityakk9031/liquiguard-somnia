@@ -188,7 +188,12 @@ export function ScrollFrameCanvas() {
 //  • Takes up 100vh, text fades out as user scrolls away
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function HeroTextSection() {
+interface HeroTextSectionProps {
+  onLaunchVault?: () => void;
+  onOpenArchitecture?: () => void;
+}
+
+export function HeroTextSection({ onLaunchVault, onOpenArchitecture }: HeroTextSectionProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [opacity, setOpacity] = useState(1);
   const [translateY, setTranslateY] = useState(0);
@@ -260,10 +265,16 @@ export function HeroTextSection() {
 
         {/* CTA */}
         <div className="flex items-center justify-center gap-3 pt-1">
-          <button className="glow-btn-primary px-7 py-3 rounded-xl text-sm font-bold">
+          <button
+            onClick={onLaunchVault}
+            className="glow-btn-primary px-7 py-3 rounded-xl text-sm font-bold cursor-pointer hover:scale-105 transition-all shadow-lg"
+          >
             Launch Vault ↓
           </button>
-          <button className="px-6 py-3 rounded-xl bg-white/5 border border-white/10 text-sm font-semibold text-purple-200 hover:bg-white/10 transition-all backdrop-blur-sm">
+          <button
+            onClick={onOpenArchitecture}
+            className="px-6 py-3 rounded-xl bg-white/5 border border-white/10 text-sm font-semibold text-purple-200 hover:bg-white/10 hover:text-white transition-all backdrop-blur-sm cursor-pointer hover:scale-105"
+          >
             Architecture →
           </button>
         </div>

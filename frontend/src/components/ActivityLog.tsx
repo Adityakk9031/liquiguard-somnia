@@ -76,8 +76,22 @@ export function ActivityLog({ events }: ActivityLogProps) {
                 className="p-2.5 rounded-xl bg-purple-950/40 border border-purple-500/20 hover:border-purple-500/40 transition-colors space-y-0.5"
               >
                 <div className="flex items-center justify-between text-[11px] font-semibold text-white">
-                  <span className="truncate max-w-[200px]">{evt.title}</span>
-                  <span className="text-[9px] text-purple-400/60 font-mono">
+                  <div className="flex items-center gap-1.5 truncate max-w-[210px]">
+                    <span className="truncate">{evt.title}</span>
+                    {evt.txHash && (
+                      <a
+                        href={`https://shannon-explorer.somnia.network/tx/${evt.txHash}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-cyan-400 hover:text-cyan-200 inline-flex items-center transition-colors flex-shrink-0"
+                        title="View on Somnia Explorer"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <ExternalLink className="w-2.5 h-2.5" />
+                      </a>
+                    )}
+                  </div>
+                  <span className="text-[9px] text-purple-400/60 font-mono flex-shrink-0">
                     {formatDistanceToNow(evt.timestamp)}
                   </span>
                 </div>
@@ -90,10 +104,14 @@ export function ActivityLog({ events }: ActivityLogProps) {
 
       {/* Footer */}
       <div className="pt-2 border-t border-white/[0.06] flex items-center justify-between text-[10px] text-purple-300/70 font-mono">
-        <span>Channel: Real-Time WS</span>
+        <span className="flex items-center gap-1">
+          <span>Channel: HTTP 1.2s</span>
+          <span className="text-purple-500">•</span>
+          <span className="text-cyan-300/90 font-medium">Session Persisted</span>
+        </span>
         <span className="text-emerald-300 flex items-center gap-1">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-          Listening
+          Live
         </span>
       </div>
     </div>

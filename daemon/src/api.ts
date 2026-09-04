@@ -11,6 +11,8 @@ import {
   publicClient,
   walletClient,
   MockPriceOracleABI,
+  MockERC20ABI,
+  LiquiGuardVaultABI,
   isContractDeployed,
   withRetry,
 } from './chain.js';
@@ -208,16 +210,16 @@ export function createApiServer(): express.Express {
 
       if (isOracleLive) {
         try {
-          // Chainlink 8 decimals: $2250 -> 225000000000
+          // Chainlink 8 decimals: $2000 -> 200000000000
           const priceUnits = parseUnits(targetPrice.toFixed(8), 8);
           const hash = await withRetry(async () => {
             return await walletClient.writeContract({
               address: config.contracts.priceOracleAddress,
               abi: MockPriceOracleABI,
-              functionName: 'setETHPrice',
+              functionName: 'setPrice',
               args: [priceUnits],
             });
-          }, 2, 500, 'setETHPrice');
+          }, 2, 500, 'setPrice');
 
           onChainTxHash = hash;
           logger.info(`[API] Oracle price updated on-chain: tx=${hash}`);
@@ -268,7 +270,7 @@ export function createApiServer(): express.Express {
   // Reset simulation state
   app.post('/api/reset', async (_req: Request, res: Response) => {
     try {
-      const defaultPrice = 3000.0;
+      const defaultPrice = 2000.0;
       store.setSimulatedEthPrice(defaultPrice);
 
       // Reset watched vaults to initial healthy state
@@ -276,9 +278,9 @@ export function createApiServer(): express.Express {
       for (const v of vaults) {
         store.upsertVault({
           ...v,
-          collateralWETH: '1.0',
-          debtUSDC: '1440.0',
-          healthFactor: 1.67,
+          collateralWETH: v.collateralWETH, // keep actual on-chain collateral
+          debtUSDC: v.debtUSDC,              // keep actual on-chain debt
+          healthFactor: 1.78,
           isProtected: false,
           status: 'HEALTHY',
           lastCheckedAt: Date.now(),
@@ -294,20 +296,99 @@ export function createApiServer(): express.Express {
           await walletClient.writeContract({
             address: config.contracts.priceOracleAddress,
             abi: MockPriceOracleABI,
-            functionName: 'setETHPrice',
+            functionName: 'setPrice',
             args: [priceUnits],
           });
         } catch {
           // ignore contract error during reset
         }
+
+        // Reset on-chain vault HedgeStatus to Idle (0) for all watched users
+        // so future crash simulations can trigger new hedges
+        const isVaultLive = await isContractDeployed(config.contracts.vaultAddress);
+        if (isVaultLive) {
+          for (const v of vaults) {
+            try {
+              await withRetry(async () => {
+                return await walletClient.writeContract({
+                  address: config.contracts.vaultAddress,
+                  abi: LiquiGuardVaultABI,
+                  functionName: 'setHedgeStatus',
+                  args: [v.userAddress as `0x${string}`, 0], // 0 = Idle
+                });
+              }, 2, 500, `setHedgeStatus(${v.userAddress}, Idle)`);
+              logger.info(`[API] Reset: cleared on-chain HedgeStatus to Idle for ${v.userAddress}`);
+            } catch (err) {
+              logger.warn(`[API] Reset: could not clear HedgeStatus for ${v.userAddress}: ${err instanceof Error ? err.message : String(err)}`);
+            }
+          }
+        }
       }
 
-      logger.info('[API] Simulation state reset to default ($3000 ETH, 1.67 HF)');
+      // Trigger a fresh vault check to read actual on-chain state after reset
+      await monitor.checkAllVaults();
+
+      logger.info('[API] Simulation state reset to default ($2000 ETH, protection cleared)');
       res.json({
         success: true,
-        message: 'Simulation state reset to default healthy parameters ($3,000 ETH, 1.67 HF)',
+        message: 'Simulation state reset to default healthy parameters ($2,000 ETH, protection cleared)',
         price: defaultPrice,
         vaults: store.getAllVaults(),
+      });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // ── Faucet — mint WETH + tUSDC using deployer key (no gas needed from user) ──
+  app.post('/api/faucet', async (req: Request, res: Response) => {
+    try {
+      const { address } = req.body;
+      if (!address || typeof address !== 'string' || !address.startsWith('0x')) {
+        res.status(400).json({ error: 'Valid Ethereum address required in body.address' });
+        return;
+      }
+
+      const userAddr = address as `0x${string}`;
+      const results: Record<string, string | undefined> = {};
+
+      // Mint 10 WETH
+      try {
+        const wethHash = await withRetry(async () =>
+          walletClient.writeContract({
+            address: config.contracts.wethAddress,
+            abi: MockERC20ABI,
+            functionName: 'mint',
+            args: [userAddr, parseUnits('10', 18)],
+          }), 2, 500, 'mintWETH');
+        results.wethTxHash = wethHash;
+        logger.info(`[API] Faucet: minted 10 WETH to ${address} — tx=${wethHash}`);
+      } catch (e) {
+        results.wethError = e instanceof Error ? e.message : String(e);
+        logger.warn(`[API] Faucet WETH mint failed: ${results.wethError}`);
+      }
+
+      // Mint 10,000 tUSDC
+      try {
+        const tusdcHash = await withRetry(async () =>
+          walletClient.writeContract({
+            address: config.contracts.tusdcAddress,
+            abi: MockERC20ABI,
+            functionName: 'mint',
+            args: [userAddr, parseUnits('10000', 6)],
+          }), 2, 500, 'mintTUSDC');
+        results.tusdcTxHash = tusdcHash;
+        logger.info(`[API] Faucet: minted 10,000 tUSDC to ${address} — tx=${tusdcHash}`);
+      } catch (e) {
+        results.tusdcError = e instanceof Error ? e.message : String(e);
+        logger.warn(`[API] Faucet tUSDC mint failed: ${results.tusdcError}`);
+      }
+
+      res.json({
+        success: !results.wethError && !results.tusdcError,
+        message: `Faucet dispatched for ${address}`,
+        minted: { weth: '10', tusdc: '10000' },
+        ...results,
       });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });

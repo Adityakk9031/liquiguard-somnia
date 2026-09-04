@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { HedgeStatus } from '@/types';
 import { ShieldCheck, Zap, RefreshCw, CheckCircle2, TrendingDown } from 'lucide-react';
 import { formatUSD } from '@/lib/utils';
@@ -19,6 +19,29 @@ export function HedgeStatusBadge({
   isHedging,
 }: HedgeStatusBadgeProps) {
   const effectiveStatus = isHedging ? HedgeStatus.HEDGING : status;
+
+  // Measure real RPC round-trip latency to Somnia node
+  const [latencyMs, setLatencyMs] = useState<number | null>(null);
+
+  useEffect(() => {
+    const measureLatency = async () => {
+      try {
+        const t0 = performance.now();
+        await fetch('https://dream-rpc.somnia.network', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', method: 'eth_blockNumber', params: [], id: 1 }),
+        });
+        const ms = Math.round(performance.now() - t0);
+        setLatencyMs(ms);
+      } catch {
+        setLatencyMs(null);
+      }
+    };
+    measureLatency();
+    const iv = setInterval(measureLatency, 5000);
+    return () => clearInterval(iv);
+  }, []);
 
   return (
     <div className="rounded-2xl glass-panel p-5 flex flex-col justify-between h-full border border-purple-500/25">
@@ -107,8 +130,12 @@ export function HedgeStatusBadge({
 
         <div className="p-2 rounded-lg bg-purple-950/30 border border-purple-500/20 text-center">
           <div className="text-[9px] text-purple-300/70">Somnia Latency:</div>
-          <div className="text-xs sm:text-sm font-mono font-bold text-cyan-300">
-            ~78ms
+          <div className={`text-xs sm:text-sm font-mono font-bold ${
+            latencyMs === null ? 'text-purple-400' :
+            latencyMs < 150 ? 'text-cyan-300' :
+            latencyMs < 400 ? 'text-yellow-300' : 'text-red-300'
+          }`}>
+            {latencyMs === null ? '—ms' : `${latencyMs}ms`}
           </div>
         </div>
       </div>

@@ -10,11 +10,32 @@ interface HeaderProps {
 
 export function Header({ onOpenArchitecture }: HeaderProps) {
   const [scrolled, setScrolled] = useState(false);
+  const [rpcLatencyMs, setRpcLatencyMs] = useState<number | null>(null);
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 40);
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // Live RPC latency measurement every 10s
+  useEffect(() => {
+    const measure = async () => {
+      try {
+        const t0 = performance.now();
+        await fetch('https://dream-rpc.somnia.network', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', method: 'eth_blockNumber', params: [], id: 1 }),
+        });
+        setRpcLatencyMs(Math.round(performance.now() - t0));
+      } catch {
+        setRpcLatencyMs(null);
+      }
+    };
+    measure();
+    const iv = setInterval(measure, 10_000);
+    return () => clearInterval(iv);
   }, []);
 
   return (
@@ -53,7 +74,13 @@ export function Header({ onOpenArchitecture }: HeaderProps) {
             </span>
             <span className="text-white/70">Chain 50312</span>
             <span className="text-purple-400/40">|</span>
-            <span className="text-cyan-300 font-mono text-[11px]">&lt;100ms</span>
+            <span className={`font-mono text-[11px] ${
+              rpcLatencyMs === null ? 'text-purple-400' :
+              rpcLatencyMs < 150 ? 'text-cyan-300' :
+              rpcLatencyMs < 400 ? 'text-yellow-300' : 'text-red-300'
+            }`}>
+              {rpcLatencyMs !== null ? `${rpcLatencyMs}ms` : '…ms'}
+            </span>
           </div>
 
           {/* Architecture Btn */}

@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: liquiguard-sentinel-daemon
+    env: node
+    rootDir: daemon
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/status
+    envVars:
+      - key: SOMNIA_RPC_URL
+        value: https://dream-rpc.somnia.network
+      - key: SOMNIA_WS_URL
+        value: wss://api.infra.testnet.somnia.network/ws
+      - key: SOMNIA_CHAIN_ID
+        value: "50312"
+      - key: VAULT_ADDRESS
+        value: 0x14b2bb3f8a25301d6ea944d571f0e7608d36c095
+      - key: LENDING_POOL_ADDRESS
+        value: 0x96b90274a27d7c933816ae6eae9959b3be05d260
+      - key: PRICE_ORACLE_ADDRESS
+        value: 0xDD2A460Bfe22BfA7c757A35F6d68813770d39712
+      - key: WETH_ADDRESS
+        value: 0x36971ac6e98aafde5c0e2ee8d55abd6c45db8283
+      - key: TUSDC_ADDRESS
+        value: 0x734a4b4d43aec0d7d58e3bae6e7b4a8fa253fd5e
+      - key: DREAMDEX_MODE
+        value: mock
+      - key: DREAMDEX_INDEXER_URL
+        value: https://dev.smk.somnia.host/v1/graphql
+      - key: HEDGE_TRIGGER_HF
+        value: "1.30"
+      - key: TARGET_HF
+        value: "1.50"
+      - key: POLL_INTERVAL_MS
+        value: "3000"
+      - key: PRIVATE_KEY
+        sync: false

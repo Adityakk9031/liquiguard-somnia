@@ -1,8 +1,9 @@
 'use client';
 
-import React from 'react';
 import { Shield, ShieldAlert, ShieldCheck, AlertTriangle } from 'lucide-react';
-import { formatUSD, getHealthFactorColor, getHealthFactorStatus } from '@/lib/utils';
+import { formatUSD, formatMetricUSD, getHealthFactorColor, getHealthFactorStatus } from '@/lib/utils';
+
+
 
 interface HealthFactorGaugeProps {
   healthFactor: number;
@@ -144,24 +145,40 @@ export function HealthFactorGauge({
 
       {/* Metrics Row */}
       <div className="grid grid-cols-3 gap-2 pt-3 border-t border-purple-900/30">
-        <div className="p-2.5 rounded-xl bg-purple-950/40 border border-purple-500/20 text-center">
-          <div className="text-[9px] text-purple-300/70 font-medium">Collateral</div>
-          <div className="text-xs sm:text-sm font-bold text-white mt-0.5">{formatUSD(collateralUSD)}</div>
-          <div className="text-[9px] text-cyan-300 font-mono">{collateralETH.toFixed(1)} WETH</div>
+        <div className="p-2 rounded-xl bg-purple-950/40 border border-purple-500/20 text-center min-w-0 overflow-hidden">
+          <div className="text-[9px] text-purple-300/70 font-medium truncate">Collateral</div>
+          <div
+            className="text-xs sm:text-sm font-bold text-white mt-0.5 truncate tracking-tight"
+            title={formatUSD(collateralUSD)}
+          >
+            {formatMetricUSD(collateralUSD)}
+          </div>
+          <div className="text-[9px] text-cyan-300 font-mono truncate">{collateralETH.toFixed(1)} WETH</div>
         </div>
 
-        <div className="p-2.5 rounded-xl bg-purple-950/40 border border-purple-500/20 text-center">
-          <div className="text-[9px] text-purple-300/70 font-medium">Debt</div>
-          <div className="text-xs sm:text-sm font-bold text-pink-300 mt-0.5">{formatUSD(borrowedUSD)}</div>
-          <div className="text-[9px] text-purple-300/60 font-mono">tUSDC</div>
+        <div className="p-2 rounded-xl bg-purple-950/40 border border-purple-500/20 text-center min-w-0 overflow-hidden">
+          <div className="text-[9px] text-purple-300/70 font-medium truncate">Debt</div>
+          <div
+            className="text-xs sm:text-sm font-bold text-pink-300 mt-0.5 truncate tracking-tight"
+            title={formatUSD(borrowedUSD)}
+          >
+            {formatMetricUSD(borrowedUSD)}
+          </div>
+          <div className="text-[9px] text-purple-300/60 font-mono truncate">tUSDC</div>
         </div>
 
-        <div className="p-2.5 rounded-xl bg-purple-950/40 border border-purple-500/20 text-center">
-          <div className="text-[9px] text-purple-300/70 font-medium">Liq. Price</div>
-          <div className="text-xs sm:text-sm font-bold text-amber-300 mt-0.5">{formatUSD(liquidationPrice)}</div>
-          <div className="text-[9px] text-purple-300/60 font-mono">ETH</div>
+        <div className="p-2 rounded-xl bg-purple-950/40 border border-purple-500/20 text-center min-w-0 overflow-hidden">
+          <div className="text-[9px] text-purple-300/70 font-medium truncate">Liq. Price</div>
+          <div
+            className="text-xs sm:text-sm font-bold text-amber-300 mt-0.5 truncate tracking-tight"
+            title={formatUSD(liquidationPrice)}
+          >
+            {formatMetricUSD(liquidationPrice)}
+          </div>
+          <div className="text-[9px] text-purple-300/60 font-mono truncate">ETH</div>
         </div>
       </div>
+
     </div>
   );
 }

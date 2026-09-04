@@ -61,7 +61,16 @@ async function main(): Promise<void> {
 
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+  process.on('unhandledRejection', (reason) => {
+    logger.error(`[Main] Unhandled promise rejection: ${reason instanceof Error ? reason.message : String(reason)}`);
+  });
+
+  process.on('uncaughtException', (err) => {
+    logger.error(`[Main] Uncaught exception: ${err.message}`, { stack: err.stack });
+  });
 }
+
 
 main().catch((err) => {
   logger.error(`[Main] Fatal daemon error: ${err instanceof Error ? err.message : String(err)}`, { stack: err instanceof Error ? err.stack : undefined });

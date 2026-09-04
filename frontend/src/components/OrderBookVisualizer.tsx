@@ -84,7 +84,7 @@ export function OrderBookVisualizer({
 
       {/* Spread Bar */}
       <div className="py-1.5 px-2.5 my-1 rounded-lg bg-purple-950/60 border border-purple-500/30 flex items-center justify-between text-[11px] font-mono">
-        <span className="text-white">Spread: <strong className="text-cyan-300">$0.395</strong></span>
+        <span className="text-white">Spread: <strong className="text-cyan-300">${(downAsks[downAsks.length - 1].price - downBids[0].price).toFixed(3)}</strong></span>
         <span className="text-pink-300 flex items-center gap-1 text-[10px]">
           <Zap className="w-2.5 h-2.5" /> IOC Cap 1.5%
         </span>
@@ -114,7 +114,7 @@ export function OrderBookVisualizer({
       {/* Footer */}
       <div className="pt-2 border-t border-white/[0.06] flex items-center justify-between text-[10px] text-purple-300/70 font-mono">
         <span>Window: 15m</span>
-        <span className="text-emerald-300">Live Synced</span>
+        <span className="text-amber-300/80">Simulated CLOB</span>
       </div>
     </div>
   );

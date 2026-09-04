@@ -11,6 +11,40 @@ export function formatAddress(address?: string): string {
 }
 
 export function formatUSD(value: number): string {
+  if (isNaN(value) || !isFinite(value)) return '$0.00';
+  // If whole number >= $1,000, don't show trailing .00
+  const isWhole = value % 1 === 0;
+  const digits = Math.abs(value) >= 1000 && isWhole ? 0 : 2;
+
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(value);
+}
+
+/**
+ * Formats USD for narrow metric cards (prevents text overflow).
+ * Values >= $1,000 drop cents ($43,000 instead of $43,000.00).
+ * Values >= $100k use 'k' notation ($120k).
+ * Values >= $1M use 'M' notation ($1.5M).
+ */
+export function formatMetricUSD(value: number): string {
+  if (isNaN(value) || !isFinite(value) || value <= 0) return '$0.00';
+  if (value >= 1_000_000) {
+    return `$${(value / 1_000_000).toFixed(2)}M`;
+  }
+  if (value >= 100_000) {
+    return `$${(value / 1_000).toFixed(1)}k`;
+  }
+  if (value >= 1_000) {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      maximumFractionDigits: 0,
+    }).format(value);
+  }
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
@@ -18,6 +52,7 @@ export function formatUSD(value: number): string {
     maximumFractionDigits: 2,
   }).format(value);
 }
+
 
 export function formatCrypto(value: number, decimals: number = 4): string {
   return new Intl.NumberFormat('en-US', {

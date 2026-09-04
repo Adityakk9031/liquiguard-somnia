@@ -184,21 +184,39 @@ export class HealthFactorMonitor extends EventEmitter {
     // Try reading on-chain first if contract deployed
     if (this.contractsAvailable) {
       try {
-        const position = await withRetry(async () => {
+        const vaultState = await withRetry(async () => {
           return await publicClient.readContract({
             address: config.contracts.vaultAddress,
             abi: LiquiGuardVaultABI,
-            functionName: 'getUserPosition',
+            functionName: 'getVaultState',
             args: [addr as `0x${string}`],
           });
-        }, 2, 500, `getUserPosition(${addr})`);
+        }, 2, 500, `getVaultState(${addr})`);
 
-        if (position) {
-          const [colWethRaw, debtUsdcRaw, hfRaw, prot] = position;
+        if (vaultState) {
+          const colWethRaw = vaultState.depositedCollateral;
+          const debtUsdcRaw = vaultState.borrowedDebt;
+          const statusNum = vaultState.status;
+
           collateralWETH = parseFloat(formatUnits(colWethRaw, 18));
           debtUSDC = parseFloat(formatUnits(debtUsdcRaw, 6)); // USDC 6 decimals
-          healthFactor = parseFloat(formatUnits(hfRaw, 18));
-          isProtected = prot;
+          isProtected = Number(statusNum) === 2; // HedgeStatus.Protected = 2
+
+          if (debtUSDC > 0 && collateralWETH > 0) {
+            try {
+              const liveHF = await publicClient.readContract({
+                address: config.contracts.vaultAddress,
+                abi: LiquiGuardVaultABI,
+                functionName: 'getHealthFactor',
+                args: [addr as `0x${string}`],
+              });
+              healthFactor = parseFloat(formatUnits(liveHF, 18));
+            } catch {
+              healthFactor = (collateralWETH * ethPrice * this.liquidationThreshold) / debtUSDC;
+            }
+          } else {
+            healthFactor = 999.0;
+          }
         }
       } catch (err) {
         logger.debug(`[Monitor] On-chain position query failed for ${addr}, falling back to simulated formula: ${err instanceof Error ? err.message : String(err)}`);
@@ -206,7 +224,7 @@ export class HealthFactorMonitor extends EventEmitter {
         const existing = store.getVault(addr);
         if (existing) {
           collateralWETH = parseFloat(existing.collateralWETH) || 1.0;
-          debtUSDC = parseFloat(existing.debtUSDC) || 1440.0;
+          debtUSDC = parseFloat(existing.debtUSDC) || 900.0;
           isProtected = existing.isProtected;
           // Calculate HF = (Collateral * Price * LT) / Debt
           if (debtUSDC > 0) {
@@ -234,6 +252,14 @@ export class HealthFactorMonitor extends EventEmitter {
     // Determine vault status
     let status: WatchedVault['status'] = 'HEALTHY';
     const existing = store.getVault(addr);
+
+    // Key fix: If vault is PROTECTED but HF has dropped below trigger again
+    // (new crash scenario), the vault needs re-hedging — clear protection flag
+    const needsReHedge = isProtected && healthFactor < config.thresholds.hedgeTriggerHf && debtUSDC > 0;
+    if (needsReHedge) {
+      logger.warn(`[Monitor] 🔄 Vault ${addr} was PROTECTED but HF dropped again to ${healthFactor.toFixed(2)} — clearing protection for re-hedge`);
+      isProtected = false;
+    }
 
     if (existing?.status === 'HEDGING') {
       status = 'HEDGING';
@@ -303,31 +329,35 @@ export class HealthFactorMonitor extends EventEmitter {
 
   private async syncOnChainUsers(): Promise<void> {
     try {
-      const activeUsers = await publicClient.readContract({
+      // Get current block and query only last 900 blocks (Somnia RPC limits to 1000)
+      const currentBlock = await publicClient.getBlockNumber();
+      const fromBlock = currentBlock > 900n ? currentBlock - 900n : 0n;
+
+      const logs = await publicClient.getContractEvents({
         address: config.contracts.vaultAddress,
         abi: LiquiGuardVaultABI,
-        functionName: 'getActiveUsers',
+        eventName: 'CollateralDeposited',
+        fromBlock,
       });
 
-      if (Array.isArray(activeUsers)) {
-        for (const user of activeUsers) {
-          if (user && typeof user === 'string') {
-            await this.addWatchAddress(user);
-          }
+      for (const log of logs) {
+        const user = log.args?.user;
+        if (user && typeof user === 'string') {
+          await this.addWatchAddress(user);
         }
       }
     } catch (err) {
-      logger.debug(`[Monitor] getActiveUsers contract call failed: ${err instanceof Error ? err.message : String(err)}`);
+      logger.debug(`[Monitor] syncOnChainUsers events query failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
   public async getCurrentETHPrice(): Promise<number> {
     if (this.contractsAvailable && config.contracts.priceOracleAddress !== '0x0000000000000000000000000000000000000000') {
       try {
-        const rawPrice = await publicClient.readContract({
+        const [rawPrice] = await publicClient.readContract({
           address: config.contracts.priceOracleAddress,
           abi: MockPriceOracleABI,
-          functionName: 'getETHPrice',
+          functionName: 'getLatestPrice',
         });
         const price = parseFloat(formatUnits(rawPrice, 8)); // 8 decimals standard Chainlink
         if (price > 0) {

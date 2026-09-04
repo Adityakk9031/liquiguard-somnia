@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
-import { TrendingDown, RefreshCw, Flame } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { TrendingDown, RefreshCw, Flame, AlertTriangle, ShieldCheck } from 'lucide-react';
 import { formatUSD } from '@/lib/utils';
 
 interface CrashSimulatorProps {
@@ -10,6 +10,8 @@ interface CrashSimulatorProps {
   onSimulateDrop: (dropPercentage: number) => void;
   onResetPrice: () => void;
   isSimulating: boolean;
+  depositedWETH?: number;
+  borrowedUSDC?: number;
 }
 
 export function CrashSimulator({
@@ -18,16 +20,53 @@ export function CrashSimulator({
   onSimulateDrop,
   onResetPrice,
   isSimulating,
+  depositedWETH = 0,
+  borrowedUSDC = 0,
 }: CrashSimulatorProps) {
-  const [dropPercentage, setDropPercentage] = useState<number>(15);
+  // Calculate exact drop % needed to trigger hedge (<1.30 HF) for this vault's position
+  // Always calculate from $2000 base (reset price), not from live oracle which could be crashed
+  const RESET_PRICE = 2000;
+  const triggerDropPercent = useMemo(() => {
+    if (depositedWETH > 0 && borrowedUSDC > 0) {
+      // P_trigger = (1.15 * debt) / (collateral * 0.80)
+      const targetP = (1.15 * borrowedUSDC) / (depositedWETH * 0.80);
+      const drop = Math.ceil(((RESET_PRICE - targetP) / RESET_PRICE) * 100);
+      return Math.max(15, Math.min(85, drop));
+    }
+    return 35;
+  }, [depositedWETH, borrowedUSDC]);
 
-  const targetPrice = basePrice * (1 - dropPercentage / 100);
+  const [dropPercentage, setDropPercentage] = useState<number>(triggerDropPercent);
+
+  // Keep the slider default synced when vault position changes
+  // Only auto-update if the user hasn't manually dragged from the computed default
+  const prevTriggerRef = React.useRef(triggerDropPercent);
+  React.useEffect(() => {
+    const prev = prevTriggerRef.current;
+    if (triggerDropPercent !== prev) {
+      // Only update if the user was still at the old computed default (i.e. hadn't manually changed it)
+      setDropPercentage((cur) => (cur === prev ? triggerDropPercent : cur));
+      prevTriggerRef.current = triggerDropPercent;
+    }
+  }, [triggerDropPercent]);
+
+  // targetPrice and projectedHF always computed from $2000 reference
+  const targetPrice = RESET_PRICE * (1 - dropPercentage / 100);
+
+  // Projected HF at target price
+  const projectedHF = useMemo(() => {
+    if (depositedWETH > 0 && borrowedUSDC > 0) {
+      return (depositedWETH * targetPrice * 0.8) / borrowedUSDC;
+    }
+    return null;
+  }, [depositedWETH, borrowedUSDC, targetPrice]);
+
 
   const presets = [
-    { label: '-5% Dip', value: 5 },
-    { label: '-15% (Trigger)', value: 15 },
-    { label: '-25% Crash', value: 25 },
-    { label: '-35% Black Swan', value: 35 },
+    { label: '-15% Dip', value: 15 },
+    { label: '-30% Warning', value: 30 },
+    { label: `-${triggerDropPercent}% (Trigger)`, value: triggerDropPercent },
+    { label: '-80% Black Swan', value: 80 },
   ];
 
   return (
@@ -52,9 +91,25 @@ export function CrashSimulator({
 
         {/* Price Box */}
         <div className="grid grid-cols-2 gap-2 my-2.5">
-          <div className="p-2.5 rounded-xl bg-purple-950/40 border border-purple-500/20">
-            <div className="text-[9px] text-purple-300/70 uppercase">Base Oracle</div>
-            <div className="text-sm sm:text-base font-extrabold text-white">{formatUSD(basePrice)}</div>
+          <div className={`p-2.5 rounded-xl border ${
+            basePrice < 1500
+              ? 'bg-red-950/40 border-red-500/40'
+              : 'bg-purple-950/40 border-purple-500/20'
+          }`}>
+            <div className="flex items-center gap-1 text-[9px] uppercase mb-0.5">
+              <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${
+                basePrice < 1500 ? 'bg-red-400' : 'bg-emerald-400'
+              }`} />
+              <span className={basePrice < 1500 ? 'text-red-300/80' : 'text-purple-300/70'}>
+                Live Oracle
+              </span>
+            </div>
+            <div className={`text-sm sm:text-base font-extrabold ${
+              basePrice < 1500 ? 'text-red-300' : 'text-white'
+            }`}>{formatUSD(basePrice)}</div>
+            {basePrice < 1500 && (
+              <div className="text-[9px] text-red-400/80 mt-0.5">⚠ CRASHED — hit Reset</div>
+            )}
           </div>
 
           <div className="p-2.5 rounded-xl bg-pink-950/40 border border-pink-500/30">
@@ -74,18 +129,40 @@ export function CrashSimulator({
 
           <input
             type="range"
-            min="0"
-            max="35"
+            min="5"
+            max="85"
             step="1"
             value={dropPercentage}
             onChange={(e) => setDropPercentage(Number(e.target.value))}
             className="w-full h-2 bg-purple-950/80 rounded-lg appearance-none cursor-pointer accent-pink-500 border border-purple-500/30"
           />
 
+          {/* Projected HF Feedback */}
+          {projectedHF !== null && (
+            <div className="flex items-center justify-between text-[10px] px-1 py-0.5">
+              <span className="text-purple-300/70">Projected Health Factor:</span>
+              <span className={`font-mono font-bold flex items-center gap-1 ${
+                projectedHF < 1.30 ? 'text-red-400 animate-pulse' : 'text-emerald-400'
+              }`}>
+                {projectedHF < 1.30 ? (
+                  <>
+                    <AlertTriangle className="w-3 h-3" />
+                    <span>{projectedHF.toFixed(2)} (🚨 Triggers Sentinel)</span>
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck className="w-3 h-3" />
+                    <span>{projectedHF.toFixed(2)} (Safe &gt; 1.30)</span>
+                  </>
+                )}
+              </span>
+            </div>
+          )}
+
           <div className="grid grid-cols-4 gap-1 pt-1">
             {presets.map((p) => (
               <button
-                key={p.value}
+                key={p.label}
                 onClick={() => setDropPercentage(p.value)}
                 className={`py-1 px-1 rounded-lg text-[10px] font-medium transition-all ${
                   dropPercentage === p.value
@@ -127,3 +204,4 @@ export function CrashSimulator({
     </div>
   );
 }
+

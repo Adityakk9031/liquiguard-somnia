@@ -7,7 +7,9 @@ import { dreamdex, type IOCOrderResult, type SettlementResult } from './dreamdex
 import {
   publicClient,
   walletClient,
+  relayerAccount,
   LiquiGuardVaultABI,
+  MockERC20ABI,
   isContractDeployed,
   withRetry,
 } from './chain.js';
@@ -92,8 +94,9 @@ export class HedgeExecutor extends EventEmitter {
       const settlement: SettlementResult = await dreamdex.settleHedge(
         orderResult.orderId,
         risk.priceETH,
-        3000.0 // strike price
+        2000.0 // strike price
       );
+
 
       const payoutUSDC = settlement.payoutUSDC > 0 ? settlement.payoutUSDC : orderResult.potentialPayoutUSDC;
       hedgeRecord.payoutUSDC = payoutUSDC;
@@ -115,6 +118,53 @@ export class HedgeExecutor extends EventEmitter {
           // On-chain call to executeProtectionHedge(user, payoutAmount)
           // USDC standard decimals: 6
           const payoutUnits = parseUnits(payoutUSDC.toFixed(6), 6);
+          const relayerAddr = relayerAccount.address;
+
+          // 1. Ensure relayer/operator has sufficient tUSDC
+          try {
+            const relayerBalance = await publicClient.readContract({
+              address: config.contracts.tusdcAddress,
+              abi: MockERC20ABI,
+              functionName: 'balanceOf',
+              args: [relayerAddr],
+            });
+
+            if (relayerBalance < payoutUnits) {
+              logger.info(`[Executor] Minting tUSDC for relayer payout...`);
+              const mintHash = await walletClient.writeContract({
+                address: config.contracts.tusdcAddress,
+                abi: MockERC20ABI,
+                functionName: 'mint',
+                args: [relayerAddr, parseUnits('50000', 6)],
+              });
+              await publicClient.waitForTransactionReceipt({ hash: mintHash });
+            }
+          } catch (mErr) {
+            logger.warn(`[Executor] Relayer tUSDC balance check/mint warning: ${mErr instanceof Error ? mErr.message : String(mErr)}`);
+          }
+
+          // 2. Ensure relayer approved vault to transfer tUSDC
+          try {
+            const allowance = await publicClient.readContract({
+              address: config.contracts.tusdcAddress,
+              abi: MockERC20ABI,
+              functionName: 'allowance',
+              args: [relayerAddr, config.contracts.vaultAddress],
+            });
+
+            if (allowance < payoutUnits) {
+              logger.info(`[Executor] Approving tUSDC to vault contract...`);
+              const appHash = await walletClient.writeContract({
+                address: config.contracts.tusdcAddress,
+                abi: MockERC20ABI,
+                functionName: 'approve',
+                args: [config.contracts.vaultAddress, parseUnits('1000000', 6)],
+              });
+              await publicClient.waitForTransactionReceipt({ hash: appHash });
+            }
+          } catch (aErr) {
+            logger.warn(`[Executor] Relayer tUSDC approval warning: ${aErr instanceof Error ? aErr.message : String(aErr)}`);
+          }
 
           const hash = await withRetry(async () => {
             return await walletClient.writeContract({

@@ -1,5 +1,6 @@
 import { Address } from 'viem';
 
+// ─── Contract Addresses ────────────────────────────────────────────────────
 export const CONTRACT_ADDRESSES = {
   vault: (process.env.NEXT_PUBLIC_VAULT_ADDRESS ||
     '0x14b2bb3f8a25301d6ea944d571f0e7608d36c095') as Address,
@@ -13,43 +14,72 @@ export const CONTRACT_ADDRESSES = {
     '0x734a4b4d43aec0d7d58e3bae6e7b4a8fa253fd5e') as Address,
 };
 
+// ─── LiquiGuardVault ABI (matches deployed LiquiGuardVault.sol exactly) ─────
+// Functions: depositCollateral, borrowDebt, depositAndBorrow, repayDebt,
+//            withdrawCollateral, executeProtectionHedge, getHealthFactor,
+//            getVaultState, vaultStates (public mapping)
 export const LIQUIGUARD_VAULT_ABI = [
+  // ── User Actions ──────────────────────────────────────────────────────────
   {
     type: 'function',
-    name: 'deposit',
+    name: 'depositCollateral',
     inputs: [{ name: 'amount', type: 'uint256' }],
     outputs: [],
     stateMutability: 'nonpayable',
   },
   {
     type: 'function',
-    name: 'withdraw',
+    name: 'borrowDebt',
     inputs: [{ name: 'amount', type: 'uint256' }],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'depositAndBorrow',
+    inputs: [
+      { name: 'collateralAmount', type: 'uint256' },
+      { name: 'borrowAmount', type: 'uint256' },
+    ],
     outputs: [],
     stateMutability: 'nonpayable',
   },
   {
     type: 'function',
     name: 'repayDebt',
+    inputs: [{ name: 'amount', type: 'uint256' }],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'withdrawCollateral',
+    inputs: [{ name: 'amount', type: 'uint256' }],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  // ── Operator Actions ──────────────────────────────────────────────────────
+  {
+    type: 'function',
+    name: 'executeProtectionHedge',
     inputs: [
       { name: 'user', type: 'address' },
-      { name: 'amount', type: 'uint256' },
+      { name: 'payoutAmount', type: 'uint256' },
     ],
     outputs: [],
     stateMutability: 'nonpayable',
   },
   {
     type: 'function',
-    name: 'getUserPosition',
-    inputs: [{ name: 'user', type: 'address' }],
-    outputs: [
-      { name: 'collateralWETH', type: 'uint256' },
-      { name: 'debtUSDC', type: 'uint256' },
-      { name: 'healthFactor', type: 'uint256' },
+    name: 'setHedgeStatus',
+    inputs: [
+      { name: 'user', type: 'address' },
       { name: 'status', type: 'uint8' },
     ],
-    stateMutability: 'view',
+    outputs: [],
+    stateMutability: 'nonpayable',
   },
+  // ── View Functions ────────────────────────────────────────────────────────
   {
     type: 'function',
     name: 'getHealthFactor',
@@ -58,38 +88,38 @@ export const LIQUIGUARD_VAULT_ABI = [
     stateMutability: 'view',
   },
   {
+    // Returns VaultState struct:
+    // { depositedCollateral, borrowedDebt, status (HedgeStatus), lastHedgePayout, lastHealthFactor }
     type: 'function',
-    name: 'collateral',
+    name: 'getVaultState',
     inputs: [{ name: 'user', type: 'address' }],
-    outputs: [{ name: '', type: 'uint256' }],
+    outputs: [
+      {
+        name: '',
+        type: 'tuple',
+        components: [
+          { name: 'depositedCollateral', type: 'uint256' },
+          { name: 'borrowedDebt', type: 'uint256' },
+          { name: 'status', type: 'uint8' },
+          { name: 'lastHedgePayout', type: 'uint256' },
+          { name: 'lastHealthFactor', type: 'uint256' },
+        ],
+      },
+    ],
     stateMutability: 'view',
   },
   {
+    // Public mapping: vaultStates[user]
     type: 'function',
-    name: 'debt',
+    name: 'vaultStates',
     inputs: [{ name: 'user', type: 'address' }],
-    outputs: [{ name: '', type: 'uint256' }],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
-    name: 'hedgeStatus',
-    inputs: [{ name: 'user', type: 'address' }],
-    outputs: [{ name: '', type: 'uint8' }],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
-    name: 'targetHealthFactor',
-    inputs: [],
-    outputs: [{ name: '', type: 'uint256' }],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
-    name: 'triggerHealthFactor',
-    inputs: [],
-    outputs: [{ name: '', type: 'uint256' }],
+    outputs: [
+      { name: 'depositedCollateral', type: 'uint256' },
+      { name: 'borrowedDebt', type: 'uint256' },
+      { name: 'status', type: 'uint8' },
+      { name: 'lastHedgePayout', type: 'uint256' },
+      { name: 'lastHealthFactor', type: 'uint256' },
+    ],
     stateMutability: 'view',
   },
   {
@@ -101,7 +131,7 @@ export const LIQUIGUARD_VAULT_ABI = [
   },
   {
     type: 'function',
-    name: 'usdc',
+    name: 'tUSDC',
     inputs: [],
     outputs: [{ name: '', type: 'address' }],
     stateMutability: 'view',
@@ -121,8 +151,23 @@ export const LIQUIGUARD_VAULT_ABI = [
     stateMutability: 'view',
   },
   {
+    type: 'function',
+    name: 'operator',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'owner',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+  },
+  // ── Events ────────────────────────────────────────────────────────────────
+  {
     type: 'event',
-    name: 'Deposited',
+    name: 'CollateralDeposited',
     inputs: [
       { name: 'user', type: 'address', indexed: true },
       { name: 'amount', type: 'uint256', indexed: false },
@@ -131,7 +176,7 @@ export const LIQUIGUARD_VAULT_ABI = [
   },
   {
     type: 'event',
-    name: 'Withdrawn',
+    name: 'DebtBorrowed',
     inputs: [
       { name: 'user', type: 'address', indexed: true },
       { name: 'amount', type: 'uint256', indexed: false },
@@ -140,23 +185,10 @@ export const LIQUIGUARD_VAULT_ABI = [
   },
   {
     type: 'event',
-    name: 'HedgeTriggered',
+    name: 'CollateralWithdrawn',
     inputs: [
       { name: 'user', type: 'address', indexed: true },
-      { name: 'hf', type: 'uint256', indexed: false },
-      { name: 'hedgeAmount', type: 'uint256', indexed: false },
-      { name: 'reason', type: 'string', indexed: false },
-    ],
-    anonymous: false,
-  },
-  {
-    type: 'event',
-    name: 'HedgeSettled',
-    inputs: [
-      { name: 'user', type: 'address', indexed: true },
-      { name: 'payout', type: 'uint256', indexed: false },
-      { name: 'debtRepaid', type: 'uint256', indexed: false },
-      { name: 'newHf', type: 'uint256', indexed: false },
+      { name: 'amount', type: 'uint256', indexed: false },
     ],
     anonymous: false,
   },
@@ -166,72 +198,98 @@ export const LIQUIGUARD_VAULT_ABI = [
     inputs: [
       { name: 'user', type: 'address', indexed: true },
       { name: 'amount', type: 'uint256', indexed: false },
-      { name: 'remainingDebt', type: 'uint256', indexed: false },
     ],
     anonymous: false,
   },
   {
     type: 'event',
-    name: 'HealthFactorUpdated',
+    name: 'HedgeExecuted',
     inputs: [
       { name: 'user', type: 'address', indexed: true },
-      { name: 'newHf', type: 'uint256', indexed: false },
+      { name: 'payoutAmount', type: 'uint256', indexed: false },
+      { name: 'newHealthFactor', type: 'uint256', indexed: false },
     ],
     anonymous: false,
   },
+  {
+    type: 'event',
+    name: 'HedgeStatusUpdated',
+    inputs: [
+      { name: 'user', type: 'address', indexed: true },
+      { name: 'status', type: 'uint8', indexed: false },
+    ],
+    anonymous: false,
+  },
+  // ── Custom Errors ─────────────────────────────────────────────────────────
+  { type: 'error', name: 'ZeroAddress', inputs: [] },
+  { type: 'error', name: 'ZeroAmount', inputs: [] },
+  { type: 'error', name: 'InsufficientCollateral', inputs: [] },
+  { type: 'error', name: 'InsufficientDebt', inputs: [] },
+  { type: 'error', name: 'Unauthorized', inputs: [] },
+  { type: 'error', name: 'TransferFailed', inputs: [] },
+  {
+    type: 'error',
+    name: 'UnsafeHealthFactor',
+    inputs: [
+      { name: 'currentHealthFactor', type: 'uint256' },
+      { name: 'requiredHealthFactor', type: 'uint256' },
+    ],
+  },
 ] as const;
 
+// ─── MockPriceOracle ABI (matches deployed MockPriceOracle.sol) ───────────
 export const MOCK_PRICE_ORACLE_ABI = [
   {
     type: 'function',
-    name: 'getPrice',
+    name: 'getLatestPrice',
+    inputs: [],
+    outputs: [
+      { name: 'price', type: 'uint256' },
+      { name: 'timestamp', type: 'uint256' },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'getETHPrice',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'setETHPrice',
+    inputs: [{ name: 'price', type: 'uint256' }],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'getAssetPrice',
     inputs: [{ name: 'asset', type: 'address' }],
     outputs: [{ name: '', type: 'uint256' }],
     stateMutability: 'view',
   },
   {
     type: 'function',
-    name: 'setPrice',
+    name: 'setAssetPrice',
     inputs: [
       { name: 'asset', type: 'address' },
-      { name: 'newPrice', type: 'uint256' },
+      { name: 'price', type: 'uint256' },
     ],
     outputs: [],
     stateMutability: 'nonpayable',
   },
   {
     type: 'function',
-    name: 'getEthPrice',
+    name: 'decimals',
     inputs: [],
-    outputs: [{ name: '', type: 'uint256' }],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
-    name: 'setEthPrice',
-    inputs: [{ name: 'newPrice', type: 'uint256' }],
-    outputs: [],
-    stateMutability: 'nonpayable',
-  },
-  {
-    type: 'function',
-    name: 'latestAnswer',
-    inputs: [],
-    outputs: [{ name: '', type: 'int256' }],
-    stateMutability: 'view',
-  },
-  {
-    type: 'event',
-    name: 'PriceUpdated',
-    inputs: [
-      { name: 'asset', type: 'address', indexed: true },
-      { name: 'newPrice', type: 'uint256', indexed: false },
-      { name: 'timestamp', type: 'uint256', indexed: false },
-    ],
-    anonymous: false,
+    outputs: [{ name: '', type: 'uint8' }],
+    stateMutability: 'pure',
   },
 ] as const;
 
+// ─── MockLendingPool ABI (matches deployed MockLendingPool.sol) ───────────
 export const MOCK_LENDING_POOL_ABI = [
   {
     type: 'function',
@@ -239,8 +297,6 @@ export const MOCK_LENDING_POOL_ABI = [
     inputs: [
       { name: 'asset', type: 'address' },
       { name: 'amount', type: 'uint256' },
-      { name: 'onBehalfOf', type: 'address' },
-      { name: 'referralCode', type: 'uint16' },
     ],
     outputs: [],
     stateMutability: 'nonpayable',
@@ -251,9 +307,6 @@ export const MOCK_LENDING_POOL_ABI = [
     inputs: [
       { name: 'asset', type: 'address' },
       { name: 'amount', type: 'uint256' },
-      { name: 'interestRateMode', type: 'uint256' },
-      { name: 'referralCode', type: 'uint16' },
-      { name: 'onBehalfOf', type: 'address' },
     ],
     outputs: [],
     stateMutability: 'nonpayable',
@@ -264,8 +317,6 @@ export const MOCK_LENDING_POOL_ABI = [
     inputs: [
       { name: 'asset', type: 'address' },
       { name: 'amount', type: 'uint256' },
-      { name: 'interestRateMode', type: 'uint256' },
-      { name: 'onBehalfOf', type: 'address' },
     ],
     outputs: [{ name: '', type: 'uint256' }],
     stateMutability: 'nonpayable',
@@ -275,9 +326,9 @@ export const MOCK_LENDING_POOL_ABI = [
     name: 'getUserAccountData',
     inputs: [{ name: 'user', type: 'address' }],
     outputs: [
-      { name: 'totalCollateralETH', type: 'uint256' },
-      { name: 'totalDebtETH', type: 'uint256' },
-      { name: 'availableBorrowsETH', type: 'uint256' },
+      { name: 'totalCollateralUSD', type: 'uint256' },
+      { name: 'totalDebtUSD', type: 'uint256' },
+      { name: 'availableBorrowsUSD', type: 'uint256' },
       { name: 'currentLiquidationThreshold', type: 'uint256' },
       { name: 'ltv', type: 'uint256' },
       { name: 'healthFactor', type: 'uint256' },
@@ -286,13 +337,21 @@ export const MOCK_LENDING_POOL_ABI = [
   },
   {
     type: 'function',
-    name: 'getHealthFactor',
+    name: 'userCollateral',
+    inputs: [{ name: 'user', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'userDebt',
     inputs: [{ name: 'user', type: 'address' }],
     outputs: [{ name: '', type: 'uint256' }],
     stateMutability: 'view',
   },
 ] as const;
 
+// ─── ERC20 ABI (MockERC20 — WETH 18 dec, tUSDC 6 dec) ────────────────────
 export const ERC20_ABI = [
   {
     type: 'function',
