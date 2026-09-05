@@ -1,4 +1,4 @@
-import { type PublicClient, formatUnits, type Address } from 'viem';
+import { type PublicClient, formatUnits, getAddress, type Address } from 'viem';
 import { CONTRACT_ADDRESSES, LIQUIGUARD_VAULT_ABI } from '@/lib/contracts';
 import { ProtocolEvent } from '@/types';
 
@@ -42,154 +42,122 @@ const VAULT_LOG_CONFIG: Record<
   },
 };
 
-async function blockTimestamps(
-  publicClient: PublicClient,
-  blockNumbers: bigint[],
-): Promise<Map<bigint, number>> {
-  const unique = Array.from(new Set(blockNumbers));
-  const entries = await Promise.all(
-    unique.map(async (blockNumber) => {
-      const block = await publicClient.getBlock({ blockNumber });
-      return [blockNumber, Number(block.timestamp) * 1000] as const;
-    }),
-  );
-  return new Map(entries);
+/** Somnia RPC rejects eth_getLogs ranges over ~1000 blocks. */
+const LOOKBACK = BigInt(900);
+
+function sortActivityEvents(events: ProtocolEvent[]): ProtocolEvent[] {
+  return [...events]
+    .sort((a, b) => {
+      if (b.timestamp !== a.timestamp) return b.timestamp - a.timestamp;
+      return (b.sortKey ?? 0) - (a.sortKey ?? 0);
+    })
+    .slice(0, 50);
 }
 
 export async function fetchOnChainVaultEvents(
   publicClient: PublicClient,
   userAddress: string,
 ): Promise<ProtocolEvent[]> {
-  const user = userAddress.toLowerCase() as Address;
+  let user: Address;
+  try {
+    user = getAddress(userAddress);
+  } catch {
+    return [];
+  }
+
+  const latestBlock = await publicClient.getBlockNumber();
+  const latestHeader = await publicClient.getBlock({ blockNumber: latestBlock });
+  const latestTsMs = Number(latestHeader.timestamp) * 1000;
+  const fromBlock = latestBlock > LOOKBACK ? latestBlock - LOOKBACK : BigInt(0);
+  const eventNames = Object.keys(VAULT_LOG_CONFIG) as VaultLogName[];
+
+  const logBatches = await Promise.all(
+    eventNames.map(async (eventName) => {
+      try {
+        return await publicClient.getContractEvents({
+          address: CONTRACT_ADDRESSES.vault,
+          abi: LIQUIGUARD_VAULT_ABI,
+          eventName,
+          args: { user },
+          fromBlock,
+          toBlock: latestBlock,
+        });
+      } catch {
+        return [];
+      }
+    }),
+  );
+
   const events: ProtocolEvent[] = [];
 
-  for (const eventName of Object.keys(VAULT_LOG_CONFIG) as VaultLogName[]) {
-    try {
-      const logs = await publicClient.getContractEvents({
-        address: CONTRACT_ADDRESSES.vault,
-        abi: LIQUIGUARD_VAULT_ABI,
-        eventName,
-        args: { user },
-        fromBlock: BigInt(0),
-        toBlock: 'latest',
-      });
-
-      if (logs.length === 0) continue;
-
-      const timestamps = await blockTimestamps(
-        publicClient,
-        logs.map((log) => log.blockNumber),
-      );
+  for (const logs of logBatches) {
+    for (const log of logs) {
+      const eventName = log.eventName as VaultLogName;
       const cfg = VAULT_LOG_CONFIG[eventName];
+      if (!cfg) continue;
 
-      for (const log of logs) {
-        const txHash = log.transactionHash;
-        const timestamp = timestamps.get(log.blockNumber) ?? Date.now();
+      const txHash = log.transactionHash;
+      const delta = Number(latestBlock - log.blockNumber);
+      const timestamp = latestTsMs - delta * 1000;
+      const sortKey = Number(log.blockNumber) * 10_000 + (log.logIndex ?? 0);
 
-        if (eventName === 'HedgeExecuted') {
-          const args = log.args as { payoutAmount: bigint; newHealthFactor: bigint };
-          const payout = Number(formatUnits(args.payoutAmount, 6));
-          const hf = Number(formatUnits(args.newHealthFactor, 18));
-          events.push({
-            id: `chain-hedge-${txHash}`,
-            type: 'HEDGE_SETTLED',
-            title: cfg.title(payout),
-            description: `Operator repaid vault debt on-chain. HF → ${hf.toFixed(2)}`,
-            timestamp,
-            txHash,
-            source: 'ON-CHAIN',
-          });
-          continue;
-        }
-
-        const amountRaw = (log.args as { amount?: bigint }).amount;
-        if (amountRaw === undefined) continue;
-        const amount = Number(formatUnits(amountRaw, cfg.decimals));
+      if (eventName === 'HedgeExecuted') {
+        const args = log.args as { payoutAmount?: bigint; newHealthFactor?: bigint };
+        const payout = Number(formatUnits(args.payoutAmount ?? BigInt(0), 6));
+        const hf = Number(formatUnits(args.newHealthFactor ?? BigInt(0), 18));
         events.push({
-          id: `chain-${eventName}-${txHash}-${log.logIndex}`,
-          type: cfg.type,
-          title: cfg.title(amount),
-          description: 'On-chain vault transaction',
+          id: `chain-hedge-${txHash}`,
+          type: 'HEDGE_SETTLED',
+          title: cfg.title(payout),
+          description: `Operator repaid vault debt on-chain. HF → ${hf.toFixed(2)}`,
           timestamp,
+          sortKey,
           txHash,
           source: 'ON-CHAIN',
         });
+        continue;
       }
-    } catch {
-      // Skip failed log fetches — daemon hedge history may still populate the feed.
-    }
-  }
 
-  return events;
-}
-
-interface DaemonHedgeRecord {
-  id: string;
-  userAddress?: string;
-  status?: string;
-  payoutUSDC?: number;
-  triggerHf?: number;
-  hedgeSizeUSDC?: number;
-  newHealthFactor?: number;
-  txHash?: string;
-  createdAt?: number;
-  completedAt?: number;
-}
-
-export function daemonHedgesToEvents(
-  history: DaemonHedgeRecord[],
-  userAddress: string,
-): ProtocolEvent[] {
-  const user = userAddress.toLowerCase();
-  const events: ProtocolEvent[] = [];
-
-  for (const h of history) {
-    if (!h.userAddress || h.userAddress.toLowerCase() !== user) continue;
-
-    const chainHash =
-      typeof h.txHash === 'string' && h.txHash.startsWith('0x') && h.txHash.length === 66
-        ? h.txHash
-        : undefined;
-
-    if (h.status === 'SETTLED' || h.status === 'COMPLETED' || (h.payoutUSDC && Number(h.payoutUSDC) > 0)) {
+      const amountRaw = (log.args as { amount?: bigint }).amount;
+      if (amountRaw === undefined) continue;
+      const amount = Number(formatUnits(amountRaw, cfg.decimals));
       events.push({
-        id: chainHash ? `chain-hedge-${chainHash}` : `hedge-settled-${h.id}`,
-        type: 'HEDGE_SETTLED',
-        title: `✅ Micro-Hedge Settled: +$${Number(h.payoutUSDC)?.toFixed(2)} tUSDC`,
-        description: chainHash
-          ? `Operator repaid vault debt on-chain. HF → ${h.newHealthFactor?.toFixed(2) || 'Safe'}`
-          : `Payout simulated (no operator tx). HF → ${h.newHealthFactor?.toFixed(2) || 'Safe'}`,
-        timestamp: h.completedAt || h.createdAt || Date.now(),
-        txHash: chainHash,
-        source: chainHash ? 'ON-CHAIN' : 'DAEMON',
+        id: `chain-${eventName}-${txHash}-${log.logIndex ?? 0}`,
+        type: cfg.type,
+        title: cfg.title(amount),
+        description: 'On-chain vault transaction',
+        timestamp,
+        sortKey,
+        txHash,
+        source: 'ON-CHAIN',
       });
     }
-
-    events.push({
-      id: `hedge-triggered-${h.id}`,
-      type: 'HEDGE_TRIGGERED',
-      title: `🚨 Micro-Hedge Triggered (HF: ${Number(h.triggerHf)?.toFixed(2)})`,
-      description: `DreamDEX mock DOWN sized $${Number(h.hedgeSizeUSDC)?.toFixed(2)} — not a chain tx`,
-      timestamp: h.createdAt || Date.now(),
-      source: 'DAEMON',
-    });
   }
 
   return events;
 }
 
-export async function fetchDaemonHedgeEvents(userAddress: string): Promise<ProtocolEvent[]> {
+export async function fetchDaemonActivity(userAddress: string): Promise<{
+  ok: boolean;
+  events: ProtocolEvent[];
+  lastPayout: number;
+  totalPayout: number;
+}> {
   try {
-    const resp = await fetch(
-      `${DAEMON_URL}/api/history?address=${encodeURIComponent(userAddress)}&limit=50`,
-      { signal: AbortSignal.timeout(4000) },
-    );
-    if (!resp.ok) return [];
+    const resp = await fetch(`${DAEMON_URL}/api/activity/${encodeURIComponent(userAddress)}`, {
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!resp.ok) return { ok: false, events: [], lastPayout: 0, totalPayout: 0 };
     const data = await resp.json();
-    if (!Array.isArray(data.history)) return [];
-    return daemonHedgesToEvents(data.history, userAddress);
+    const events: ProtocolEvent[] = Array.isArray(data.events) ? data.events : [];
+    return {
+      ok: true,
+      events,
+      lastPayout: Number(data.lastPayout) || 0,
+      totalPayout: Number(data.totalPayout) || 0,
+    };
   } catch {
-    return [];
+    return { ok: false, events: [], lastPayout: 0, totalPayout: 0 };
   }
 }
 
@@ -197,6 +165,7 @@ export function mergeActivityEvents(events: ProtocolEvent[]): ProtocolEvent[] {
   const byId = new Map<string, ProtocolEvent>();
 
   for (const ev of events) {
+    if (!ev?.id) continue;
     const existing = byId.get(ev.id);
     if (!existing) {
       byId.set(ev.id, ev);
@@ -204,21 +173,17 @@ export function mergeActivityEvents(events: ProtocolEvent[]): ProtocolEvent[] {
     }
 
     const preferNew =
-      ev.source === 'ON-CHAIN' && existing.source !== 'ON-CHAIN' ||
-      ev.txHash && !existing.txHash ||
-      ev.timestamp > existing.timestamp;
+      (ev.source === 'ON-CHAIN' && existing.source !== 'ON-CHAIN') ||
+      Boolean(ev.txHash && !existing.txHash);
 
     if (preferNew) {
       byId.set(ev.id, { ...existing, ...ev });
     }
   }
 
-  return Array.from(byId.values())
-    .sort((a, b) => b.timestamp - a.timestamp)
-    .slice(0, 50);
+  return sortActivityEvents(Array.from(byId.values()));
 }
 
-/** Remove legacy localStorage keys from the old session-persisted feed. */
 export function clearLegacyActivityStorage(userAddress?: string): void {
   if (typeof window === 'undefined') return;
   try {

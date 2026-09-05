@@ -9,6 +9,7 @@ import { DataSourceBadge, CardChipRow } from '@/lib/dataSource';
 interface ActivityLogProps {
   events: ProtocolEvent[];
   isConnected: boolean;
+  isLoading?: boolean;
 }
 
 function SourceTag({ source }: { source?: 'ON-CHAIN' | 'DAEMON' | 'LOCAL' }) {
@@ -25,13 +26,13 @@ function SourceTag({ source }: { source?: 'ON-CHAIN' | 'DAEMON' | 'LOCAL' }) {
   );
 }
 
-export function ActivityLog({ events, isConnected }: ActivityLogProps) {
+export function ActivityLog({ events, isConnected, isLoading = false }: ActivityLogProps) {
   const [filter, setFilter] = useState<'ALL' | 'HEDGE' | 'VAULT'>('ALL');
 
   const filteredEvents = events.filter((e) => {
     if (filter === 'ALL') return true;
     if (filter === 'HEDGE') return e.type === 'HEDGE_TRIGGERED' || e.type === 'HEDGE_SETTLED';
-    if (filter === 'VAULT') return e.type === 'DEPOSIT' || e.type === 'BORROW' || e.type === 'WITHDRAW' || e.type === 'FAUCET';
+    if (filter === 'VAULT') return e.type === 'DEPOSIT' || e.type === 'BORROW' || e.type === 'WITHDRAW' || e.type === 'FAUCET' || e.type === 'DEBT_REPAID';
     return true;
   });
 
@@ -86,9 +87,11 @@ export function ActivityLog({ events, isConnected }: ActivityLogProps) {
         <div className="space-y-2 max-h-[175px] overflow-y-auto pr-1 my-2 text-xs">
           {filteredEvents.length === 0 ? (
             <div className="py-6 text-center text-purple-300/50 text-[11px]">
-              {isConnected
-                ? 'No vault activity yet. Deposit collateral to get started.'
-                : 'Connect your wallet to view your vault activity.'}
+              {!isConnected
+                ? 'Connect your wallet to view your vault activity.'
+                : isLoading
+                  ? 'Loading on-chain vault activity…'
+                  : 'No vault activity yet. Deposit collateral to get started.'}
             </div>
           ) : (
             filteredEvents.map((evt) => (

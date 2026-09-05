@@ -6,50 +6,14 @@ import { type PublicClient } from 'viem';
 import { ProtocolEvent } from '@/types';
 import {
   clearLegacyActivityStorage,
-  fetchDaemonHedgeEvents,
+  fetchDaemonActivity,
   fetchOnChainVaultEvents,
   mergeActivityEvents,
 } from '@/lib/vaultActivity';
 
-const DAEMON_URL = process.env.NEXT_PUBLIC_DAEMON_URL || 'http://localhost:3001';
-
 export interface HedgePayoutStats {
   lastPayout: number;
   totalPayout: number;
-}
-
-async function fetchHedgePayoutStats(userAddress: string): Promise<HedgePayoutStats> {
-  try {
-    const resp = await fetch(
-      `${DAEMON_URL}/api/history?address=${encodeURIComponent(userAddress)}&limit=50`,
-      { signal: AbortSignal.timeout(4000) },
-    );
-    if (!resp.ok) return { lastPayout: 0, totalPayout: 0 };
-    const data = await resp.json();
-    if (!Array.isArray(data.history)) return { lastPayout: 0, totalPayout: 0 };
-
-    const user = userAddress.toLowerCase();
-    const userHistory = data.history.filter(
-      (h: { userAddress?: string }) => h.userAddress?.toLowerCase() === user,
-    );
-
-    const completed = userHistory.filter(
-      (h: { status?: string; payoutUSDC?: number }) =>
-        h.status === 'COMPLETED' || (h.payoutUSDC && Number(h.payoutUSDC) > 0),
-    );
-
-    const totalPayout = completed.reduce(
-      (sum: number, h: { payoutUSDC?: number }) => sum + (Number(h.payoutUSDC) || 0),
-      0,
-    );
-
-    const latest = completed[0];
-    const lastPayout = latest ? Number(latest.payoutUSDC) || 0 : 0;
-
-    return { lastPayout, totalPayout };
-  } catch {
-    return { lastPayout: 0, totalPayout: 0 };
-  }
 }
 
 export function useWalletActivity(
@@ -58,61 +22,102 @@ export function useWalletActivity(
 ) {
   const publicClient = usePublicClient();
   const [events, setEvents] = useState<ProtocolEvent[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
   const [payoutStats, setPayoutStats] = useState<HedgePayoutStats>({
     lastPayout: 0,
     totalPayout: 0,
   });
   const sessionEventsRef = useRef<ProtocolEvent[]>([]);
+  const chainEventsRef = useRef<ProtocolEvent[]>([]);
+  const daemonEventsRef = useRef<ProtocolEvent[]>([]);
+
+  const publish = useCallback(() => {
+    setEvents(
+      mergeActivityEvents([
+        ...chainEventsRef.current,
+        ...daemonEventsRef.current,
+        ...sessionEventsRef.current,
+      ]),
+    );
+  }, []);
+
+  const refreshDaemon = useCallback(async () => {
+    if (!isConnected || !address) return;
+    const data = await fetchDaemonActivity(address);
+    if (!data.ok) return;
+    daemonEventsRef.current = data.events;
+    setPayoutStats({ lastPayout: data.lastPayout, totalPayout: data.totalPayout });
+    publish();
+  }, [address, isConnected, publish]);
+
+  const refreshChain = useCallback(async () => {
+    if (!isConnected || !address || !publicClient) return;
+    try {
+      const chainEvents = await fetchOnChainVaultEvents(publicClient as PublicClient, address);
+      chainEventsRef.current = mergeActivityEvents([
+        ...chainEventsRef.current,
+        ...chainEvents,
+      ]);
+      publish();
+    } catch {
+      // Keep previously loaded chain events.
+    }
+  }, [address, isConnected, publicClient, publish]);
 
   const refreshActivity = useCallback(async () => {
-    if (!isConnected || !address || !publicClient) return;
-
-    const [chainEvents, daemonEvents, stats] = await Promise.all([
-      fetchOnChainVaultEvents(publicClient as PublicClient, address),
-      fetchDaemonHedgeEvents(address),
-      fetchHedgePayoutStats(address),
-    ]);
-
-    setPayoutStats(stats);
-
-    const merged = mergeActivityEvents([
-      ...chainEvents,
-      ...daemonEvents,
-      ...sessionEventsRef.current,
-    ]);
-    setEvents(merged);
-  }, [address, isConnected, publicClient]);
+    await Promise.all([refreshDaemon(), refreshChain()]);
+  }, [refreshDaemon, refreshChain]);
 
   const addEvent = useCallback(
     (event: Omit<ProtocolEvent, 'id' | 'timestamp'>) => {
       if (!isConnected || !address) return;
 
+      const now = Date.now();
       const newEvt: ProtocolEvent = {
         ...event,
-        id: `session-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        timestamp: Date.now(),
+        id: event.txHash
+          ? `session-tx-${event.txHash}-${event.type}`
+          : `session-${now}-${Math.random().toString(36).slice(2, 6)}`,
+        timestamp: now,
+        sortKey: now,
       };
 
-      sessionEventsRef.current = [newEvt, ...sessionEventsRef.current].slice(0, 20);
-      setEvents((prev) => mergeActivityEvents([newEvt, ...prev]));
+      sessionEventsRef.current = mergeActivityEvents([newEvt, ...sessionEventsRef.current]).slice(0, 20);
+      publish();
     },
-    [address, isConnected],
+    [address, isConnected, publish],
   );
 
   useEffect(() => {
     if (!isConnected || !address) {
       setEvents([]);
+      setIsLoading(false);
       setPayoutStats({ lastPayout: 0, totalPayout: 0 });
       sessionEventsRef.current = [];
+      chainEventsRef.current = [];
+      daemonEventsRef.current = [];
       return;
     }
 
+    let cancelled = false;
     clearLegacyActivityStorage(address);
-    refreshActivity();
+    setIsLoading(true);
 
-    const interval = setInterval(refreshActivity, 3000);
-    return () => clearInterval(interval);
-  }, [address, isConnected, refreshActivity]);
+    const load = async () => {
+      await Promise.all([refreshDaemon(), refreshChain()]);
+      if (!cancelled) setIsLoading(false);
+    };
 
-  return { events, addEvent, refreshActivity, payoutStats };
+    load();
+
+    const daemonIv = setInterval(refreshDaemon, 2000);
+    const chainIv = setInterval(refreshChain, 8000);
+    return () => {
+      cancelled = true;
+      clearInterval(daemonIv);
+      clearInterval(chainIv);
+    };
+  }, [address, isConnected, refreshDaemon, refreshChain]);
+
+  return { events, addEvent, refreshActivity, payoutStats, isLoading };
 }

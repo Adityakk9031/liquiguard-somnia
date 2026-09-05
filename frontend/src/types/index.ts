@@ -33,6 +33,8 @@ export interface ProtocolEvent {
   txHash?: string;
   /** Data source for this event — shown as a tag in the activity log */
   source?: 'ON-CHAIN' | 'DAEMON' | 'LOCAL';
+  /** Tie-breaker for events sharing the same timestamp */
+  sortKey?: number;
 
   data?: {
     amount?: string;

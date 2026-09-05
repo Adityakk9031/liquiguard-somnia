@@ -16,6 +16,7 @@ import {
   isContractDeployed,
   withRetry,
 } from './chain.js';
+import { getUserActivity } from './activity.js';
 
 export function createApiServer(): express.Express {
   const app = express();
@@ -136,6 +137,22 @@ export function createApiServer(): express.Express {
 
       monitor.removeWatchAddress(address);
       res.json({ message: `Unregistered vault for ${address}` });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // Wallet-linked vault + hedge activity (chunked on-chain logs + daemon hedges)
+  app.get('/api/activity/:address', async (req: Request, res: Response) => {
+    try {
+      const paramAddr = req.params.address;
+      const addr = (Array.isArray(paramAddr) ? paramAddr[0] : paramAddr) as string;
+      if (!addr || !addr.startsWith('0x') || addr.length !== 42) {
+        res.status(400).json({ error: 'Valid Ethereum address is required' });
+        return;
+      }
+      const activity = await getUserActivity(addr);
+      res.json(activity);
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }

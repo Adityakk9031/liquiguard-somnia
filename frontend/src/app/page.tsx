@@ -148,7 +148,7 @@ export default function Home() {
   const [daemonLastPayout, setDaemonLastPayout] = useState(0);
   const [totalHedgePayouts, setTotalHedgePayouts] = useState(0);
 
-  const { events, addEvent, refreshActivity, payoutStats } = useWalletActivity(address, isConnected);
+  const { events, addEvent, refreshActivity, payoutStats, isLoading: isActivityLoading } = useWalletActivity(address, isConnected);
 
   useEffect(() => {
     setDaemonLastPayout(payoutStats.lastPayout);
@@ -194,6 +194,13 @@ export default function Home() {
   // Refresh on-chain activity after confirmed transactions
   useEffect(() => {
     if (txStep === 'success' && lastTxHash) {
+      addEvent({
+        type: lastAction,
+        title: `✅ ${lastAction === 'BORROW' ? 'Borrow' : lastAction === 'WITHDRAW' ? 'Withdrawal' : lastAction === 'FAUCET' ? 'Faucet' : 'Deposit'} Confirmed on-chain`,
+        description: `tx: ${lastTxHash.slice(0, 12)}…${lastTxHash.slice(-6)}`,
+        txHash: lastTxHash,
+        source: 'ON-CHAIN',
+      });
       setTimeout(() => { refetchAll(); refreshActivity(); }, 1000);
       setTimeout(() => resetTx(), 4000);
     }
@@ -213,6 +220,13 @@ export default function Home() {
     const borrowUSDC = suggestedBorrowUSDC(amount, ethPriceForCalc);
     const hash = await depositAndBorrow(amount, borrowUSDC);
     if (hash) {
+      addEvent({
+        type: 'DEPOSIT',
+        title: `+${amount} WETH Deposited + ${borrowUSDC.toLocaleString()} tUSDC Borrowed`,
+        description: `Vault deposit + borrow at target HF ~1.40.`,
+        txHash: hash,
+        source: 'ON-CHAIN',
+      });
       setTimeout(() => refreshActivity(), 1500);
     }
   };
@@ -222,6 +236,13 @@ export default function Home() {
     setLastAction('WITHDRAW');
     const hash = await withdraw(amount);
     if (hash) {
+      addEvent({
+        type: 'WITHDRAW',
+        title: `−${amount} WETH Withdrawn`,
+        description: 'Collateral returned to wallet.',
+        txHash: hash,
+        source: 'ON-CHAIN',
+      });
       setTimeout(() => refreshActivity(), 1500);
     }
   };
@@ -231,6 +252,13 @@ export default function Home() {
     setLastAction('BORROW');
     const hash = await borrow(amount);
     if (hash) {
+      addEvent({
+        type: 'BORROW',
+        title: `Borrowed ${amount.toLocaleString()} tUSDC`,
+        description: 'Additional tUSDC borrowed against existing collateral.',
+        txHash: hash,
+        source: 'ON-CHAIN',
+      });
       setTimeout(() => refreshActivity(), 1500);
     }
   };
@@ -501,7 +529,7 @@ export default function Home() {
                 />
               </div>
               <div className="h-full">
-                <ActivityLog events={events} isConnected={isConnected} />
+                <ActivityLog events={events} isConnected={isConnected} isLoading={isActivityLoading} />
               </div>
             </div>
           </div>
