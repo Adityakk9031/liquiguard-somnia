@@ -13,13 +13,27 @@ export interface UserPosition {
   ltv: number;
 }
 
+export type ProtocolEventType =
+  | 'DEPOSIT'
+  | 'BORROW'
+  | 'WITHDRAW'
+  | 'FAUCET'
+  | 'PRICE_DROP'
+  | 'PRICE_RESET'
+  | 'HEDGE_TRIGGERED'
+  | 'HEDGE_SETTLED'
+  | 'DEBT_REPAID';
+
 export interface ProtocolEvent {
   id: string;
-  type: 'DEPOSIT' | 'WITHDRAW' | 'PRICE_DROP' | 'PRICE_RESET' | 'HEDGE_TRIGGERED' | 'HEDGE_SETTLED' | 'DEBT_REPAID';
+  type: ProtocolEventType;
   title: string;
   description: string;
   timestamp: number;
   txHash?: string;
+  /** Data source for this event — shown as a tag in the activity log */
+  source?: 'ON-CHAIN' | 'DAEMON' | 'LOCAL';
+
   data?: {
     amount?: string;
     hf?: number;

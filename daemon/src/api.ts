@@ -37,6 +37,7 @@ export function createApiServer(): express.Express {
       const stats = store.getStats();
       const currentEthPrice = await monitor.getCurrentETHPrice();
       const isVaultLive = await isContractDeployed(config.contracts.vaultAddress);
+      const markets = await dreamdex.getActiveMarkets();
 
       res.json({
         status: 'online',
@@ -59,6 +60,12 @@ export function createApiServer(): express.Express {
           indexerUrl: config.dreamdex.indexerUrl,
           defaultMarket: config.dreamdex.defaultMarketId,
           entryPrice: config.dreamdex.entryPrice,
+          strikePrice: markets[0]?.strikePrice ?? 2000,
+          marketsCount: markets.length,
+        },
+        monitor: {
+          watchedVaults: store.getAllVaults().length,
+          lastPollAt: monitor.getLastPollAt(),
         },
         thresholds: {
           hedgeTriggerHf: config.thresholds.hedgeTriggerHf,
@@ -138,7 +145,12 @@ export function createApiServer(): express.Express {
   app.get('/api/history', (req: Request, res: Response) => {
     try {
       const limit = parseInt(req.query.limit as string || '50', 10);
-      const history = store.getHedgeHistory(limit);
+      const addressParam = req.query.address;
+      const address =
+        typeof addressParam === 'string' && addressParam.startsWith('0x')
+          ? addressParam
+          : undefined;
+      const history = store.getHedgeHistory(limit, address);
       res.json({ history, count: history.length });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });

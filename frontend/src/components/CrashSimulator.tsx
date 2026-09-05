@@ -3,6 +3,7 @@
 import React, { useState, useMemo } from 'react';
 import { TrendingDown, RefreshCw, Flame, AlertTriangle, ShieldCheck } from 'lucide-react';
 import { formatUSD } from '@/lib/utils';
+import { DataSourceBadge, StatusChip, CardChipRow } from '@/lib/dataSource';
 
 interface CrashSimulatorProps {
   basePrice: number;
@@ -12,6 +13,7 @@ interface CrashSimulatorProps {
   isSimulating: boolean;
   depositedWETH?: number;
   borrowedUSDC?: number;
+  daemonVaultStatus?: string;
 }
 
 export function CrashSimulator({
@@ -22,6 +24,7 @@ export function CrashSimulator({
   isSimulating,
   depositedWETH = 0,
   borrowedUSDC = 0,
+  daemonVaultStatus = 'HEALTHY',
 }: CrashSimulatorProps) {
   // Calculate exact drop % needed to trigger hedge (<1.30 HF) for this vault's position
   // Always calculate from $2000 base (reset price), not from live oracle which could be crashed
@@ -73,21 +76,35 @@ export function CrashSimulator({
     <div className="rounded-2xl glass-panel p-5 flex flex-col justify-between h-full border border-pink-500/25">
       <div>
         {/* Header */}
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <div className="p-1.5 rounded-lg bg-pink-950/80 border border-pink-500/30">
+        <div className="flex items-start justify-between gap-2 mb-2">
+          <div className="flex items-start gap-2 min-w-0">
+            <div className="p-1.5 rounded-lg bg-pink-950/80 border border-pink-500/30 shrink-0 mt-0.5">
               <Flame className="w-4 h-4 text-pink-400" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-white tracking-tight">Market Crash Simulator</h3>
+              <h3 className="text-sm font-bold text-white tracking-tight leading-snug">Market Crash Simulator</h3>
               <p className="text-[10px] text-pink-200/70">Interactive Demo for Judges</p>
             </div>
           </div>
 
-          <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-pink-900/50 text-pink-300 border border-pink-500/40 uppercase">
-            Demo Arena
-          </span>
+          <CardChipRow>
+            <DataSourceBadge source="LIVE_DAEMON" />
+            {daemonVaultStatus !== 'HEALTHY' && (
+              <StatusChip
+                tone={
+                  daemonVaultStatus === 'HEDGING' ? 'amber' :
+                  daemonVaultStatus === 'PROTECTED' ? 'cyan' :
+                  daemonVaultStatus === 'CRITICAL' ? 'rose' : 'yellow'
+                }
+                pulse={daemonVaultStatus === 'HEDGING' || daemonVaultStatus === 'CRITICAL'}
+              >
+                {daemonVaultStatus}
+              </StatusChip>
+            )}
+            <StatusChip tone="pink">DEMO ARENA</StatusChip>
+          </CardChipRow>
         </div>
+
 
         {/* Price Box */}
         <div className="grid grid-cols-2 gap-2 my-2.5">

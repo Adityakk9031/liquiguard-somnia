@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import Database from 'better-sqlite3';
 import { logger } from './logger.js';
 
@@ -49,10 +52,16 @@ export class DaemonStore {
   private memoryVaults = new Map<string, WatchedVault>();
   private memoryHedges = new Map<string, HedgeExecution>();
   private startedAt = Date.now();
-  private simulatedEthPrice = 3000.0;
+  private simulatedEthPrice = 2000.0;
 
-  constructor(dbPath = ':memory:') {
+  constructor(dbPath: string = ':memory:') {
     try {
+      if (dbPath !== ':memory:') {
+        const dir = path.dirname(dbPath);
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+      }
       this.db = new Database(dbPath);
       this.initTables();
       this.isSqlite = true;
@@ -280,18 +289,32 @@ export class DaemonStore {
     return undefined;
   }
 
-  public getHedgeHistory(limit = 50): HedgeExecution[] {
+  public getHedgeHistory(limit = 50, userAddress?: string): HedgeExecution[] {
+    const normalizedUser = userAddress?.toLowerCase();
+
     if (this.isSqlite && this.db) {
       try {
-        const rows = this.db.prepare('SELECT * FROM hedge_executions ORDER BY created_at DESC LIMIT ?').all(limit) as any[];
+        const rows = normalizedUser
+          ? this.db
+              .prepare(
+                'SELECT * FROM hedge_executions WHERE lower(user_address) = ? ORDER BY created_at DESC LIMIT ?',
+              )
+              .all(normalizedUser, limit) as any[]
+          : this.db
+              .prepare('SELECT * FROM hedge_executions ORDER BY created_at DESC LIMIT ?')
+              .all(limit) as any[];
         return rows.map((r) => this.mapHedgeRow(r));
       } catch (err) {
         logger.error(`[Store] Failed to get hedge history from SQLite: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
-    return Array.from(this.memoryHedges.values())
+
+    const hedges = Array.from(this.memoryHedges.values())
+      .filter((h) => !normalizedUser || h.userAddress.toLowerCase() === normalizedUser)
       .sort((a, b) => b.createdAt - a.createdAt)
       .slice(0, limit);
+
+    return hedges;
   }
 
   private mapHedgeRow(row: any): HedgeExecution {
@@ -345,5 +368,11 @@ export class DaemonStore {
   }
 }
 
-// Global store singleton
-export const store = new DaemonStore();
+// Global store singleton — persists to disk at daemon/data/sentinel.db
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+// Resolve: <repo>/daemon/data/sentinel.db (works from both src/ and dist/)
+const DB_PATH = path.resolve(__dirname, '..', 'data', 'sentinel.db');
+
+export const store = new DaemonStore(DB_PATH);
+

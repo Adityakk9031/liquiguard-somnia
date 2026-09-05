@@ -1,10 +1,20 @@
 import { createServer } from 'http';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import { dreamdex } from './dreamdex.js';
 import { monitor } from './monitor.js';
 import { executor } from './executor.js';
 import { createApiServer } from './api.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const dataDir = path.resolve(__dirname, '..', 'data');
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
+}
 
 async function main(): Promise<void> {
   console.log(`
@@ -35,6 +45,15 @@ async function main(): Promise<void> {
   // 4. Start REST API Server
   const app = createApiServer();
   const server = createServer(app);
+
+  server.on('error', (err: any) => {
+    if (err.code === 'EADDRINUSE') {
+      logger.error(`[API] Port ${config.port} is already in use. Please terminate existing process or set DAEMON_PORT.`);
+    } else {
+      logger.error(`[API] Server error: ${err.message}`);
+    }
+    process.exit(1);
+  });
 
   server.listen(config.port, () => {
     logger.info(`[API] Sentinel API server listening on http://localhost:${config.port}`);

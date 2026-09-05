@@ -10,7 +10,7 @@ import {
   usePublicClient,
 } from 'wagmi';
 import { parseUnits, formatUnits, type Address } from 'viem';
-import { CONTRACT_ADDRESSES, LIQUIGUARD_VAULT_ABI, ERC20_ABI } from '@/lib/contracts';
+import { CONTRACT_ADDRESSES, LIQUIGUARD_VAULT_ABI, ERC20_ABI, MOCK_PRICE_ORACLE_ABI } from '@/lib/contracts';
 
 const DAEMON_URL = process.env.NEXT_PUBLIC_DAEMON_URL || 'http://localhost:3001';
 
@@ -95,6 +95,27 @@ export function useVaultContracts() {
     args: [address as Address],
     query: { refetchInterval: 5_000, enabled: isConnected && !!address },
   });
+
+  // ── Oracle price directly from on-chain MockPriceOracle (8 decimals) ─────
+  // This is the source of truth for ETH price; no reliance on daemon cache.
+  const { data: oraclePriceRaw, refetch: refetchOraclePrice } = useReadContract({
+    address: CONTRACT_ADDRESSES.oracle,
+    abi: MOCK_PRICE_ORACLE_ABI,
+    functionName: 'getLatestPrice',
+    query: { refetchInterval: 3_000, enabled: true }, // Always poll even without wallet
+  });
+
+  // Parse 8-decimal oracle price: 200000000000 → $2000.00
+  const oraclePrice: number = (() => {
+    if (!oraclePriceRaw) return 2000;
+    // Returns tuple [price, timestamp]; price has 8 decimals
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const raw = oraclePriceRaw as any;
+    const priceRaw: bigint = raw?.price ?? raw?.[0] ?? BigInt(0);
+    if (!priceRaw || priceRaw === BigInt(0)) return 2000;
+    return parseFloat(formatUnits(priceRaw, 8));
+  })();
+
 
   // ── Parse balances ────────────────────────────────────────────────────────
   const wethBalance =
@@ -436,6 +457,8 @@ export function useVaultContracts() {
     tusdcBalance,
     sttBalance,
     vaultPosition,
+    // Live oracle price read directly from MockPriceOracle on-chain (8-decimal, 3s refetch)
+    oraclePrice,
     // Tx state
     txStep,
     txError,

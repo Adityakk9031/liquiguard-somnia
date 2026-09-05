@@ -7,7 +7,7 @@ export const metadata: Metadata = {
   description:
     'Protect lending collateral from liquidation with automated DreamDEX binary event micro-hedges powered by Somnia Shannon sub-second finality.',
   icons: {
-    icon: '/favicon.ico',
+    icon: '/logo.png',
   },
 };
 

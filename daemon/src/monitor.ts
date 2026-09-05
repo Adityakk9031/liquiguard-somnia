@@ -39,9 +39,14 @@ export class HealthFactorMonitor extends EventEmitter {
   private isChecking = false;
   private contractsAvailable = false;
   private liquidationThreshold = 0.80; // 80% liquidation threshold
+  private lastPollAt: number | null = null;
 
   constructor() {
     super();
+  }
+
+  public getLastPollAt(): number | null {
+    return this.lastPollAt;
   }
 
   public async start(): Promise<void> {
@@ -122,6 +127,8 @@ export class HealthFactorMonitor extends EventEmitter {
     this.isChecking = true;
 
     try {
+      this.lastPollAt = Date.now();
+
       // 1. If on-chain contract is available, discover new active users from contract
       if (this.contractsAvailable) {
         await this.syncOnChainUsers();

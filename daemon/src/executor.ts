@@ -82,20 +82,24 @@ export class HedgeExecutor extends EventEmitter {
 
       hedgeRecord.orderId = orderResult.orderId;
       hedgeRecord.status = 'ORDER_PLACED';
-      hedgeRecord.txHash = orderResult.txHash;
+      // Do not store mock DreamDEX hashes — explorer only gets the operator repay tx.
+      hedgeRecord.txHash = undefined;
       store.recordHedge(hedgeRecord);
       this.emit('orderPlaced', { executionId, orderResult });
 
       // -------------------------------------------------------------
       // Step 2: Settle Binary Event Hedge Contract
       // -------------------------------------------------------------
-      logger.info(`[Executor] 2/4 Settling hedge payout on DreamDEX for order ${orderResult.orderId}`);
+      const market = await dreamdex.getMarket(config.dreamdex.defaultMarketId);
+      const strikePrice = market?.strikePrice ?? config.dreamdex.strikePrice ?? 2000.0;
+      logger.info(`[Executor] 2/4 Settling hedge payout on DreamDEX for order ${orderResult.orderId} (strike: $${strikePrice.toFixed(2)}, price: $${risk.priceETH.toFixed(2)})`);
 
       const settlement: SettlementResult = await dreamdex.settleHedge(
         orderResult.orderId,
         risk.priceETH,
-        2000.0 // strike price
+        strikePrice
       );
+
 
 
       const payoutUSDC = settlement.payoutUSDC > 0 ? settlement.payoutUSDC : orderResult.potentialPayoutUSDC;
@@ -110,7 +114,7 @@ export class HedgeExecutor extends EventEmitter {
       logger.info(`[Executor] 3/4 Executing protection hedge payout of $${payoutUSDC.toFixed(2)} to Vault for user ${userAddr}`);
 
       const isVaultLive = await isContractDeployed(config.contracts.vaultAddress);
-      let txHash = orderResult.txHash || `0x${Array.from({ length: 64 }, () => 'a').join('')}`;
+      let onChainTxHash: `0x${string}` | undefined;
       let newHealthFactor = 1.55;
 
       if (isVaultLive) {
@@ -175,7 +179,7 @@ export class HedgeExecutor extends EventEmitter {
             });
           }, 3, 1000, `executeProtectionHedge(${userAddr})`);
 
-          txHash = hash;
+          onChainTxHash = hash;
           logger.info(`[Executor] On-chain tx submitted: ${hash}. Waiting for receipt...`);
 
           const receipt = await publicClient.waitForTransactionReceipt({
@@ -214,7 +218,7 @@ export class HedgeExecutor extends EventEmitter {
       logger.info(`[Executor] 4/4 Protection complete! Old HF=${risk.currentHF.toFixed(2)} -> New HF=${newHealthFactor.toFixed(2)} 🔵`);
 
       hedgeRecord.status = 'COMPLETED';
-      hedgeRecord.txHash = txHash;
+      hedgeRecord.txHash = onChainTxHash;
       hedgeRecord.newHealthFactor = Math.round(newHealthFactor * 100) / 100;
       hedgeRecord.completedAt = Date.now();
       store.recordHedge(hedgeRecord);

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { ReactNode, useState, useEffect } from 'react';
+import React, { ReactNode, useState } from 'react';
 import { WagmiProvider } from 'wagmi';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RainbowKitProvider, darkTheme } from '@rainbow-me/rainbowkit';
@@ -26,12 +26,6 @@ export function Providers({ children }: ProvidersProps) {
       })
   );
 
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
   return (
     <WagmiProvider config={config}>
       <QueryClientProvider client={queryClient}>
@@ -45,7 +39,7 @@ export function Providers({ children }: ProvidersProps) {
             overlayBlur: 'small',
           })}
         >
-          {mounted ? children : null}
+          {children}
         </RainbowKitProvider>
       </QueryClientProvider>
     </WagmiProvider>

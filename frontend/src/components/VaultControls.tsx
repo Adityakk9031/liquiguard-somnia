@@ -3,6 +3,8 @@
 import React, { useState } from 'react';
 import { ArrowDownToLine, ArrowUpFromLine, Droplets, ShieldCheck, Wallet } from 'lucide-react';
 import { formatUSD } from '@/lib/utils';
+import { DataSourceBadge, CardChipRow } from '@/lib/dataSource';
+import { suggestedBorrowUSDC } from '@/lib/ltv';
 
 interface VaultControlsProps {
   wethBalance: number;
@@ -85,6 +87,24 @@ export function VaultControls({
     <div className="rounded-2xl glass-panel p-5 flex flex-col justify-between h-full border border-purple-500/25">
       {/* Header Tabs */}
       <div>
+        {/* Card Header */}
+        <div className="flex items-start justify-between gap-2 mb-2">
+          <div className="flex items-start gap-2 min-w-0">
+            <div className="p-1.5 rounded-lg bg-purple-950/80 border border-purple-500/30 shrink-0 mt-0.5">
+              <Wallet className="w-4 h-4 text-pink-400" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-white tracking-tight leading-snug">Vault Actions</h3>
+              <p className="text-[10px] text-purple-300/70">Collateral &amp; Debt Management</p>
+            </div>
+          </div>
+          <CardChipRow>
+            <DataSourceBadge source="LIVE_ONCHAIN" />
+            <span className="h-5 inline-flex items-center px-1.5 rounded-md text-[9px] font-mono font-bold uppercase tracking-wide leading-none border border-purple-500/30 bg-purple-950/50 text-purple-300/80 whitespace-nowrap">
+              50312
+            </span>
+          </CardChipRow>
+        </div>
         <div className="flex items-center gap-1 p-1 rounded-xl bg-purple-950/70 border border-purple-500/20 mb-4">
           <button
             onClick={() => setActiveTab('deposit')}
@@ -171,9 +191,9 @@ export function VaultControls({
                 <strong className="text-white">+{depositAmount || '0'} WETH</strong>
               </div>
               <div className="flex justify-between">
-                <span>Auto-Borrowed (45% LTV):</span>
+                <span>Auto-Borrowed (target HF 1.40, max 75% LTV):</span>
                 <strong className="text-pink-300">
-                  +{((parseFloat(depositAmount) || 0) * ethPrice * 0.45).toFixed(0)} tUSDC
+                  +{suggestedBorrowUSDC(parseFloat(depositAmount) || 0, ethPrice).toLocaleString()} tUSDC
                 </strong>
               </div>
             </div>
@@ -205,8 +225,16 @@ export function VaultControls({
               </div>
             ) : (
               <>
+                {/* High-HF demo hint */}
+                {currentHF > 2 && remainingBorrow > 0 && (
+                  <div className="p-2 rounded-lg bg-amber-950/40 border border-amber-500/30 text-[10px] text-amber-200/90 leading-tight">
+                    💡 HF is very safe. Borrow suggested amount so a crash can trigger Sentinel (HF ~1.40).
+                  </div>
+                )}
+
                 {/* Suggested borrow for sentinel demo */}
                 {suggestedBorrow > 0 ? (
+
                   <div className="p-2.5 rounded-xl bg-pink-950/40 border border-pink-500/30 text-[10px] text-pink-200 space-y-1">
                     <div className="font-bold text-pink-300">💡 Suggested for Sentinel Demo:</div>
                     <div>Borrow <strong className="text-white">${suggestedBorrow.toFixed(0)}</strong> tUSDC to bring HF to ~1.40</div>

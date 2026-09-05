@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { Shield, Zap, ExternalLink, Layers } from 'lucide-react';
+import { useSomniaRpc } from '@/hooks/useSomniaRpc';
 
 interface HeaderProps {
   onOpenArchitecture: () => void;
@@ -10,49 +11,33 @@ interface HeaderProps {
 
 export function Header({ onOpenArchitecture }: HeaderProps) {
   const [scrolled, setScrolled] = useState(false);
-  const [rpcLatencyMs, setRpcLatencyMs] = useState<number | null>(null);
+  const { latencyMs } = useSomniaRpc(); // shared hook — no duplicate fetch
 
   useEffect(() => {
-    const handleScroll = () => setScrolled(window.scrollY > 40);
+    const handleScroll = () => setScrolled(window.scrollY > 20);
+    handleScroll();
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // Live RPC latency measurement every 10s
-  useEffect(() => {
-    const measure = async () => {
-      try {
-        const t0 = performance.now();
-        await fetch('https://dream-rpc.somnia.network', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ jsonrpc: '2.0', method: 'eth_blockNumber', params: [], id: 1 }),
-        });
-        setRpcLatencyMs(Math.round(performance.now() - t0));
-      } catch {
-        setRpcLatencyMs(null);
-      }
-    };
-    measure();
-    const iv = setInterval(measure, 10_000);
-    return () => clearInterval(iv);
-  }, []);
-
   return (
     <header
-      className={`fixed top-0 left-0 right-0 z-50 w-full transition-all duration-300 ${
+      className={`fixed top-0 left-0 right-0 z-50 w-full border-0 outline-none ring-0 shadow-none transition-[background-color,backdrop-filter] duration-300 ease-out ${
         scrolled
-          ? 'bg-[#070311]/80 backdrop-blur-2xl border-b border-white/[0.07] shadow-[0_4px_30px_rgba(0,0,0,0.5)]'
-          : 'bg-transparent backdrop-blur-none border-b border-transparent'
+          ? 'bg-[#070311]/40 backdrop-blur-xl'
+          : 'bg-transparent backdrop-blur-none'
       }`}
     >
+
       <div className="max-w-7xl mx-auto px-4 md:px-8 h-16 flex items-center justify-between gap-4">
         {/* Left: Brand / Logo */}
         <div className="flex items-center gap-3">
-          <div className="relative flex items-center justify-center w-9 h-9 rounded-xl bg-gradient-to-tr from-purple-600 via-pink-500 to-rose-500 p-0.5 shadow-[0_0_16px_rgba(236,72,153,0.5)]">
-            <div className="w-full h-full bg-[#0d041a] rounded-[10px] flex items-center justify-center">
-              <Shield className="w-5 h-5 text-pink-400 fill-pink-400/20" />
-            </div>
+          <div className="relative flex items-center justify-center w-9 h-9 rounded-xl overflow-hidden p-0.5 bg-gradient-to-tr from-purple-600 via-pink-500 to-cyan-400 shadow-[0_0_20px_rgba(236,72,153,0.45)]">
+            <img
+              src="/logo.png"
+              alt="LiquiGuard Logo"
+              className="w-full h-full object-cover rounded-[10px]"
+            />
           </div>
           <div>
             <span className="text-lg font-extrabold tracking-tight text-white leading-none">
@@ -66,27 +51,43 @@ export function Header({ onOpenArchitecture }: HeaderProps) {
 
         {/* Right: Nav Actions */}
         <div className="flex items-center gap-2">
-          {/* Somnia Status Pill */}
-          <div className="hidden lg:flex items-center gap-1.5 px-3 py-1 rounded-lg bg-black/30 border border-white/[0.08] text-xs font-medium text-purple-200 backdrop-blur-sm">
+          {/* Somnia Status Pill — shows real measured RPC latency */}
+          <div
+            className={`hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium backdrop-blur-sm transition-all duration-300 ${
+              scrolled
+                ? 'bg-purple-950/60 border border-purple-500/25 text-purple-200'
+                : 'bg-black/30 border border-white/[0.08] text-purple-200'
+            }`}
+          >
             <span className="relative flex h-1.5 w-1.5">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
               <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
             </span>
             <span className="text-white/70">Chain 50312</span>
             <span className="text-purple-400/40">|</span>
-            <span className={`font-mono text-[11px] ${
-              rpcLatencyMs === null ? 'text-purple-400' :
-              rpcLatencyMs < 150 ? 'text-cyan-300' :
-              rpcLatencyMs < 400 ? 'text-yellow-300' : 'text-red-300'
-            }`}>
-              {rpcLatencyMs !== null ? `${rpcLatencyMs}ms` : '…ms'}
+            <span
+              className={`font-mono text-[11px] ${
+                latencyMs === null
+                  ? 'text-purple-400'
+                  : latencyMs < 150
+                  ? 'text-cyan-300'
+                  : latencyMs < 400
+                  ? 'text-yellow-300'
+                  : 'text-red-300'
+              }`}
+            >
+              {latencyMs !== null ? `${latencyMs}ms` : '…ms'}
             </span>
           </div>
 
           {/* Architecture Btn */}
           <button
             onClick={onOpenArchitecture}
-            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-black/30 border border-white/[0.08] text-xs font-semibold text-purple-200 hover:text-white hover:border-purple-500/40 transition-all backdrop-blur-sm"
+            className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold backdrop-blur-sm transition-all duration-300 ${
+              scrolled
+                ? 'bg-purple-950/60 border border-purple-500/30 text-purple-200 hover:text-white hover:bg-purple-900/60 hover:border-purple-400/50'
+                : 'bg-black/30 border border-white/[0.08] text-purple-200 hover:text-white hover:border-purple-500/40'
+            }`}
           >
             <Layers className="w-3.5 h-3.5 text-purple-400" />
             <span>Architecture</span>
@@ -97,7 +98,11 @@ export function Header({ onOpenArchitecture }: HeaderProps) {
             href="https://testnet.somnia.network/"
             target="_blank"
             rel="noopener noreferrer"
-            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-black/30 border border-white/[0.08] text-xs font-semibold text-pink-300 hover:text-pink-200 hover:border-pink-500/40 transition-all backdrop-blur-sm"
+            className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold backdrop-blur-sm transition-all duration-300 ${
+              scrolled
+                ? 'bg-pink-950/50 border border-pink-500/30 text-pink-300 hover:text-pink-100 hover:bg-pink-900/60 hover:border-pink-400/50'
+                : 'bg-black/30 border border-white/[0.08] text-pink-300 hover:text-pink-200 hover:border-pink-500/40'
+            }`}
           >
             <Zap className="w-3.5 h-3.5 text-pink-400 fill-pink-400/30" />
             <span>Faucet</span>

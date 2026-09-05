@@ -29,6 +29,8 @@ export function ScrollFrameCanvas() {
   const imagesRef = useRef<HTMLImageElement[]>([]);
   const rafRef = useRef<number>(0);
   const lastFrameRef = useRef(-1);
+  const lastZoomRef = useRef(1);
+  const lastOverlayRef = useRef(0);
   const [ready, setReady] = useState(false);
 
   // ── Load all frames ───────────────────────────────────────────────────────
@@ -68,15 +70,15 @@ export function ScrollFrameCanvas() {
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Cover-scale with zoom
+    // Always cover the viewport. Zoom < 1 leaves pillarbox bars on the sides
+    // when returning to the hero. Ken Burns still zooms above 1 while scrolling.
+    const coverZoom = Math.max(zoom, 1);
     const ir = img.naturalWidth / img.naturalHeight;
     const cr = canvas.width / canvas.height;
-    const dw = ir >= cr ? canvas.height * ir * zoom : canvas.width * zoom;
-    const dh = ir >= cr ? canvas.height * zoom : (canvas.width / ir) * zoom;
+    const dw = ir >= cr ? canvas.height * ir * coverZoom : canvas.width * coverZoom;
+    const dh = ir >= cr ? canvas.height * coverZoom : (canvas.width / ir) * coverZoom;
     ctx.drawImage(img, (canvas.width - dw) / 2, (canvas.height - dh) / 2, dw, dh);
 
-    // Soft purple-tinted corner vignette — does NOT create side black bars
-    // Use two overlapping gradients: top-dark + bottom-dark, NOT a full radial
     const topFade = ctx.createLinearGradient(0, 0, 0, canvas.height * 0.35);
     topFade.addColorStop(0, 'rgba(7,3,17,0.55)');
     topFade.addColorStop(1, 'rgba(7,3,17,0)');
@@ -89,18 +91,20 @@ export function ScrollFrameCanvas() {
     ctx.fillStyle = bottomFade;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Subtle purple side glow (NOT black) — just a hint of depth
-    const leftPurple = ctx.createLinearGradient(0, 0, canvas.width * 0.18, 0);
-    leftPurple.addColorStop(0, 'rgba(60,10,90,0.35)');
-    leftPurple.addColorStop(1, 'rgba(60,10,90,0)');
-    ctx.fillStyle = leftPurple;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Side glow only after leaving the hero — otherwise it reads as a leftover frame box
+    if (overlayAlpha > 0) {
+      const leftPurple = ctx.createLinearGradient(0, 0, canvas.width * 0.18, 0);
+      leftPurple.addColorStop(0, 'rgba(60,10,90,0.35)');
+      leftPurple.addColorStop(1, 'rgba(60,10,90,0)');
+      ctx.fillStyle = leftPurple;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    const rightPurple = ctx.createLinearGradient(canvas.width * 0.82, 0, canvas.width, 0);
-    rightPurple.addColorStop(0, 'rgba(60,10,90,0)');
-    rightPurple.addColorStop(1, 'rgba(60,10,90,0.35)');
-    ctx.fillStyle = rightPurple;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+      const rightPurple = ctx.createLinearGradient(canvas.width * 0.82, 0, canvas.width, 0);
+      rightPurple.addColorStop(0, 'rgba(60,10,90,0)');
+      rightPurple.addColorStop(1, 'rgba(60,10,90,0.35)');
+      ctx.fillStyle = rightPurple;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
 
     // Dark overlay for readability when scrolled into bento/vault
     if (overlayAlpha > 0) {
@@ -116,7 +120,9 @@ export function ScrollFrameCanvas() {
     if (!c) return;
     c.width = window.innerWidth;
     c.height = window.innerHeight;
-    if (lastFrameRef.current >= 0) drawFrame(lastFrameRef.current, 1, 0);
+    if (lastFrameRef.current >= 0) {
+      drawFrame(lastFrameRef.current, lastZoomRef.current, lastOverlayRef.current);
+    }
   }, [drawFrame]);
 
   // ── Scroll → global page progress ────────────────────────────────────────
@@ -128,24 +134,22 @@ export function ScrollFrameCanvas() {
     const imgs = imagesRef.current.filter((i) => i.complete && i.naturalWidth > 0);
     const total = imgs.length;
 
-    drawFrame(0, 0.9, 0);
     lastFrameRef.current = 0;
+    lastZoomRef.current = 1;
+    lastOverlayRef.current = 0;
+    drawFrame(0, 1, 0);
 
     const onScroll = () => {
-      // Progress across full page height
       const scrollMax = document.body.scrollHeight - window.innerHeight;
       const t = scrollMax > 0 ? Math.min(window.scrollY / scrollMax, 1) : 0;
 
-      // Frames play across 85% of total page scroll (not 60% — was too fast)
-      // Apply ease-out-cubic so early frames are fast and later frames slow down
       const rawPct = Math.min(t / 0.85, 1);
-      // Ease-out-cubic: feels fast initially, crawls near the end
       const eased = 1 - Math.pow(1 - rawPct, 3);
       const fi = Math.floor(eased * (total - 1));
 
-      // Zoom: 0.9 → 1.12 at 35% scroll → 1.0 at 85%
+      // Never zoom below 1 (cover). 1.0 at hero → 1.12 mid-scroll → 1.0 later.
       let zoom: number;
-      if (t < 0.35) zoom = 0.9 + (t / 0.35) * 0.22;
+      if (t < 0.35) zoom = 1.0 + (t / 0.35) * 0.12;
       else if (t < 0.85) zoom = 1.12 - ((t - 0.35) / 0.50) * 0.12;
       else zoom = 1.0;
 
@@ -154,6 +158,8 @@ export function ScrollFrameCanvas() {
       const overlay = t < 0.30 ? 0 : Math.min((t - 0.30) / 0.45 * 0.55, 0.55);
 
       lastFrameRef.current = fi;
+      lastZoomRef.current = zoom;
+      lastOverlayRef.current = overlay;
       cancelAnimationFrame(rafRef.current);
       rafRef.current = requestAnimationFrame(() => drawFrame(fi, zoom, overlay));
     };
@@ -177,6 +183,8 @@ export function ScrollFrameCanvas() {
         zIndex: 0,
         opacity: ready ? 1 : 0,
         transition: 'opacity 0.8s ease',
+        width: '100vw',
+        height: '100vh',
       }}
     />
   );
@@ -227,6 +235,7 @@ export function HeroTextSection({ onLaunchVault, onOpenArchitecture }: HeroTextS
       >
         {/* Live badge */}
         <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-black/40 border border-white/[0.1] text-xs font-semibold text-purple-200 backdrop-blur-xl">
+          <img src="/logo.png" alt="LiquiGuard Logo" className="w-4 h-4 rounded-[4px] object-cover" />
           <span className="relative flex h-2 w-2">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-pink-400 opacity-75" />
             <span className="relative inline-flex rounded-full h-2 w-2 bg-pink-500" />
@@ -250,18 +259,37 @@ export function HeroTextSection({ onLaunchVault, onOpenArchitecture }: HeroTextS
         </p>
 
         {/* Metrics row */}
-        <div className="flex items-center justify-center gap-10 pt-2 border-t border-white/10">
-          {[
-            { val: '<100ms', label: 'Reactivity' },
-            { val: '100k+', label: 'TPS' },
-            { val: '$0', label: 'Liq Penalty', cls: 'text-pink-400' },
-          ].map(({ val, label, cls }) => (
-            <div key={label} className="text-center">
-              <div className={`text-2xl font-black font-mono ${cls ?? 'text-white'}`}>{val}</div>
-              <div className="text-[10px] text-purple-300/60 font-medium uppercase tracking-widest">{label}</div>
-            </div>
-          ))}
+        <div className="pt-2 border-t border-white/10 space-y-1">
+          <div className="flex items-center justify-center gap-10">
+            {[
+              {
+                val: '<100ms',
+                label: 'Reactivity',
+                title: 'Somnia sub-second consensus target — demo reaction time depends on keeper polling interval',
+              },
+              {
+                val: '100k+',
+                label: 'TPS',
+                title: 'Somnia network marketing spec — not measured on this page',
+              },
+              {
+                val: '$0',
+                label: 'Liq Penalty',
+                cls: 'text-pink-400',
+                title: 'Autonomous micro-hedging repays debt before liquidation threshold',
+              },
+            ].map(({ val, label, cls, title }) => (
+              <div key={label} className="text-center" title={title}>
+                <div className={`text-2xl font-black font-mono ${cls ?? 'text-white'}`}>{val}</div>
+                <div className="text-[10px] text-purple-300/60 font-medium uppercase tracking-widest">{label}</div>
+              </div>
+            ))}
+          </div>
+          <div className="text-[10px] text-purple-300/40 font-mono text-center">
+            Somnia network spec · not measured on this page
+          </div>
         </div>
+
 
         {/* CTA */}
         <div className="flex items-center justify-center gap-3 pt-1">

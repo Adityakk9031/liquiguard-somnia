@@ -24,8 +24,8 @@ export function ArchitectureModal({ isOpen, onClose }: ArchitectureModalProps) {
 
         {/* Title */}
         <div className="flex items-center space-x-3 mb-6">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600">
-            <Shield className="h-5 w-5 text-white" />
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl overflow-hidden p-0.5 bg-gradient-to-tr from-purple-600 via-pink-500 to-cyan-400 shadow-[0_0_20px_rgba(236,72,153,0.35)] shrink-0">
+            <img src="/logo.png" alt="LiquiGuard Logo" className="w-full h-full object-cover rounded-[10px]" />
           </div>
           <div>
             <h2 className="text-xl font-bold text-white">

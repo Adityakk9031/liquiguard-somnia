@@ -44,6 +44,7 @@ export interface Config {
     wsUrl: string;
     defaultMarketId: string;
     entryPrice: number;
+    strikePrice: number;
     strikeOffsetPercent: number;
     simulatedSettlementDelayMs: number;
   };
@@ -96,6 +97,7 @@ export const config: Config = {
     wsUrl: process.env.DREAMDEX_WS_URL || 'wss://api.infra.testnet.somnia.network/ws',
     defaultMarketId: process.env.DREAMDEX_MARKET_ID || 'ETH-USD-15M-DOWN',
     entryPrice: parseFloat(process.env.DREAMDEX_ENTRY_PRICE || '0.40'),
+    strikePrice: parseFloat(process.env.DREAMDEX_STRIKE_PRICE || '2000.0'),
     strikeOffsetPercent: parseFloat(process.env.DREAMDEX_STRIKE_OFFSET || '0.05'),
     simulatedSettlementDelayMs: parseInt(process.env.DREAMDEX_SETTLE_DELAY_MS || '1000', 10),
   },

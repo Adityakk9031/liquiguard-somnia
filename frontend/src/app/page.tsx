@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAccount } from 'wagmi';
 import { Header } from '@/components/Header';
 import { ScrollFrameCanvas, HeroTextSection } from '@/components/ScrollFrameHero';
@@ -15,8 +15,12 @@ import { LiveTelemetryTicker } from '@/components/LiveTelemetryTicker';
 import { PixelShatterCanvas } from '@/components/PixelShatterCanvas';
 import { PixelDissolveSection } from '@/components/PixelDissolveSection';
 import { ArchitectureModal } from '@/components/ArchitectureModal';
-import { HedgeStatus, ProtocolEvent } from '@/types';
+import { HedgeStatus } from '@/types';
 import { useVaultContracts } from '@/hooks/useVaultContracts';
+import { useDreamDexMarkets } from '@/hooks/useDreamDexMarkets';
+import { useDaemonStatus } from '@/hooks/useDaemonStatus';
+import { suggestedBorrowUSDC } from '@/lib/ltv';
+import { useWalletActivity } from '@/hooks/useWalletActivity';
 
 const DAEMON_URL = process.env.NEXT_PUBLIC_DAEMON_URL || 'http://localhost:3001';
 
@@ -44,6 +48,7 @@ export default function Home() {
   const [mounted, setMounted] = useState(false);
   const [isArchitectureOpen, setIsArchitectureOpen] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
+  const [lastAction, setLastAction] = useState<'DEPOSIT' | 'BORROW' | 'WITHDRAW' | 'FAUCET'>('DEPOSIT');
 
   // ── Real on-chain state via wagmi ─────────────────────────────────────────
   const {
@@ -61,57 +66,94 @@ export default function Home() {
     mintTokens,
     resetTx,
     refetchAll,
+    oraclePrice: onChainOraclePrice, // ← Direct on-chain read from MockPriceOracle every 3s
   } = useVaultContracts();
+
+  // ── DreamDEX markets from daemon ──────────────────────────────────────────
+  const { markets, mode: dreamdexMode } = useDreamDexMarkets();
+  const defaultMarket = markets[0] ?? null;
+
+  // ── Daemon global status ──────────────────────────────────────────────────
+  const daemonStatus = useDaemonStatus();
 
   // ── Derived vault state ───────────────────────────────────────────────────
   const depositedWETH = vaultPosition?.collateralWETH ?? 0;
   const borrowedUSDC = vaultPosition?.debtUSDC ?? 0;
   const chainHealthFactor = vaultPosition?.healthFactor ?? 0;
+
+  // ── Oracle price: on-chain first, daemon fallback ─────────────────────────
+  // onChainOraclePrice = direct read from MockPriceOracle every 3s (truth)
+  // daemonStatus.currentEthPrice = what daemon set (lags slightly behind)
+  const BASE_ETH_PRICE = 2000;
+  // liveOraclePrice tracks the actual chain oracle (syncs after crash/reset)
+  const [liveOraclePrice, setLiveOraclePrice] = useState(BASE_ETH_PRICE);
+  // currentEthPrice is the price used for UI HF calc (set immediately on crash)
+  const [currentEthPrice, setCurrentEthPrice] = useState(BASE_ETH_PRICE);
+
+  // Sync liveOraclePrice from on-chain read (3s loop)
+  useEffect(() => {
+    if (onChainOraclePrice && onChainOraclePrice > 0) {
+      setLiveOraclePrice(onChainOraclePrice);
+    }
+  }, [onChainOraclePrice]);
+
+  // ── Daemon vault status polling (hedge tracking) ──────────────────────────
+  // Poll daemon /api/vaults/:address for live status (HEALTHY|WARNING|CRITICAL|HEDGING|PROTECTED)
+  // This replaces the fragile 5s isHedgingActive timer.
+  const [daemonVaultStatus, setDaemonVaultStatus] = useState<string>('HEALTHY');
+
+  useEffect(() => {
+    if (!isConnected || !address) return;
+    let cancelled = false;
+
+    const pollVault = async () => {
+      try {
+        const resp = await fetch(`${DAEMON_URL}/api/vaults/${address}`, {
+          signal: AbortSignal.timeout(3000),
+        });
+        if (!resp.ok || cancelled) return;
+        const data = await resp.json();
+        if (data.vault?.status) {
+          setDaemonVaultStatus(data.vault.status);
+        }
+      } catch {
+        // Daemon offline — keep last known status
+      }
+    };
+
+    pollVault();
+    const iv = setInterval(pollVault, 1500);
+    return () => {
+      cancelled = true;
+      clearInterval(iv);
+    };
+  }, [address, isConnected]);
+
+  // Derive hedge status: daemon has priority, fallback to on-chain enum
   const hedgeStatusOnChain: HedgeStatus =
-    vaultPosition?.status === 1
+    daemonVaultStatus === 'HEDGING'
+      ? HedgeStatus.HEDGING
+      : daemonVaultStatus === 'PROTECTED'
+      ? HedgeStatus.PROTECTED
+      : vaultPosition?.status === 1
       ? HedgeStatus.HEDGING
       : vaultPosition?.status === 2
       ? HedgeStatus.PROTECTED
       : HedgeStatus.IDLE;
 
-  // ── Crash Simulator state (oracle price) ─────────────────────────────────
-  const BASE_ETH_PRICE = 2000; // The reference "reset" price
-  const [baseEthPrice] = useState(BASE_ETH_PRICE);
-  // liveOraclePrice = the ACTUAL on-chain oracle price (changes when you crash or reset)
-  const [liveOraclePrice, setLiveOraclePrice] = useState(2000);
-  const [currentEthPrice, setCurrentEthPrice] = useState(2000);
-  const [isHedgingActive, setIsHedgingActive] = useState(false);
+  // isHedgingActive for child components that need a boolean
+  const isHedgingActive =
+    daemonVaultStatus === 'HEDGING' || daemonVaultStatus === 'CRITICAL' || vaultPosition?.status === 1;
+
   const [daemonLastPayout, setDaemonLastPayout] = useState(0);
   const [totalHedgePayouts, setTotalHedgePayouts] = useState(0);
 
-  // Poll actual on-chain oracle price every 2 seconds from daemon /api/vaults
-  useEffect(() => {
-    const pollOracle = async () => {
-      try {
-        const resp = await fetch(`${DAEMON_URL}/api/vaults`);
-        if (!resp.ok) return;
-        const data = await resp.json();
-        // daemon tracks the last price it set on each vault
-        if (data.vaults && data.vaults.length > 0) {
-          const price = data.vaults[0]?.lastPriceETH;
-          if (price && price > 0) {
-            setLiveOraclePrice(price);
-            // If currentEthPrice is still at the old value but oracle moved (e.g. reset happened externally), sync it
-            setCurrentEthPrice((prev) => {
-              // Only auto-sync if we haven't manually set a different crash price recently
-              // We rely on liveOraclePrice for display, keep currentEthPrice for HF calc
-              return prev;
-            });
-          }
-        }
-      } catch (_) {}
-    };
-    pollOracle();
-    const iv = setInterval(pollOracle, 2000);
-    return () => clearInterval(iv);
-  }, []);
+  const { events, addEvent, refreshActivity, payoutStats } = useWalletActivity(address, isConnected);
 
-  // Real last payout: prefer on-chain vaultState, fallback to daemon history
+  useEffect(() => {
+    setDaemonLastPayout(payoutStats.lastPayout);
+    setTotalHedgePayouts(payoutStats.totalPayout);
+  }, [payoutStats]);
   const lastPayoutUSD =
     vaultPosition?.lastPayoutUSD && vaultPosition.lastPayoutUSD > 0
       ? vaultPosition.lastPayoutUSD
@@ -120,9 +162,7 @@ export default function Home() {
       : totalHedgePayouts;
 
   // ── HF: prefer chain value, fallback to simulated from oracle price ───────
-  // During crash simulation (price ≠ base), use local formula since the on-chain
-  // getHealthFactor read may be stale (5-6 second refetch delay).
-  const priceIsSimulated = currentEthPrice !== baseEthPrice;
+  const priceIsSimulated = currentEthPrice !== liveOraclePrice;
   const localHF =
     depositedWETH > 0 && borrowedUSDC > 0
       ? (depositedWETH * currentEthPrice * 0.8) / borrowedUSDC
@@ -130,7 +170,7 @@ export default function Home() {
 
   const effectiveHF =
     priceIsSimulated && depositedWETH > 0 && borrowedUSDC > 0
-      ? localHF // Use local calculation when crash simulation is active
+      ? localHF
       : depositedWETH > 0 && chainHealthFactor > 0
       ? chainHealthFactor
       : localHF;
@@ -138,216 +178,11 @@ export default function Home() {
   const collateralUSD = depositedWETH * currentEthPrice;
   const liquidationPrice = depositedWETH > 0 ? borrowedUSDC / (depositedWETH * 0.8) : 0;
 
-  // ── Persistent Activity Log Storage Helpers ────────────────────────────────
-  const getStorageKey = useCallback((userAddr?: string) => {
-    return userAddr ? `liquiguard_events_${userAddr.toLowerCase()}` : 'liquiguard_events_global';
-  }, []);
-
-  const loadStoredEvents = useCallback((userAddr?: string): ProtocolEvent[] => {
-    if (typeof window === 'undefined') return [];
-    try {
-      const specificKey = getStorageKey(userAddr);
-      const rawSpecific = localStorage.getItem(specificKey);
-      const rawGlobal = localStorage.getItem('liquiguard_events_global');
-
-      const specificList: ProtocolEvent[] = rawSpecific ? JSON.parse(rawSpecific) : [];
-      const globalList: ProtocolEvent[] = rawGlobal ? JSON.parse(rawGlobal) : [];
-
-      const combined = [...specificList, ...globalList];
-      const seen = new Set<string>();
-      const deduped: ProtocolEvent[] = [];
-      for (const ev of combined) {
-        if (ev && ev.id && !seen.has(ev.id)) {
-          seen.add(ev.id);
-          deduped.push(ev);
-        }
-      }
-      return deduped.sort((a, b) => b.timestamp - a.timestamp).slice(0, 50);
-    } catch {
-      return [];
-    }
-  }, [getStorageKey]);
-
-  const persistEvents = useCallback((newEvents: ProtocolEvent[], userAddr?: string) => {
-    if (typeof window === 'undefined') return;
-    try {
-      const toSave = JSON.stringify(newEvents.slice(0, 50));
-      const key = getStorageKey(userAddr);
-      localStorage.setItem(key, toSave);
-      localStorage.setItem('liquiguard_events_global', toSave);
-    } catch {}
-  }, [getStorageKey]);
-
-  // ── Activity events ───────────────────────────────────────────────────────
-  const [events, setEvents] = useState<ProtocolEvent[]>([
-    {
-      id: 'evt-0',
-      type: 'DEPOSIT',
-      title: 'Somnia Shannon Testnet Live (Chain ID: 50312)',
-      description: 'Connected to on-chain LiquiGuardVault at 0x14b2bb…c095',
-      timestamp: Date.now() - 60000,
-    },
-  ]);
-
   const vaultSectionRef = useRef<HTMLDivElement>(null);
 
-  // 1. Initial mount: load any stored events from localStorage
   useEffect(() => {
     setMounted(true);
-    const stored = loadStoredEvents();
-    if (stored.length > 0) {
-      setEvents((prev) => {
-        const seen = new Set(stored.map((e) => e.id));
-        const unrecorded = prev.filter((e) => !seen.has(e.id));
-        return [...stored, ...unrecorded].sort((a, b) => b.timestamp - a.timestamp).slice(0, 50);
-      });
-    }
-  }, [loadStoredEvents]);
-
-  // 2. When wallet connects/changes address: restore wallet-specific events from localStorage
-  useEffect(() => {
-    if (!isConnected || !address) return;
-    const stored = loadStoredEvents(address);
-    const connectEventId = `wallet-connect-${address.toLowerCase()}-${new Date().toISOString().slice(0, 10)}`;
-
-    setEvents((prev) => {
-      const seen = new Set<string>();
-      const combined = [...stored, ...prev];
-      const deduped: ProtocolEvent[] = [];
-
-      let hasConnect = false;
-      for (const ev of combined) {
-        if (ev.id.startsWith('wallet-connect-') && ev.id.includes(address.toLowerCase().slice(0, 8))) {
-          hasConnect = true;
-        }
-        if (!seen.has(ev.id)) {
-          seen.add(ev.id);
-          deduped.push(ev);
-        }
-      }
-
-      if (!hasConnect) {
-        deduped.unshift({
-          id: connectEventId,
-          type: 'DEPOSIT',
-          title: `Wallet Connected: ${address.slice(0, 6)}…${address.slice(-4)}`,
-          description: 'On-chain vault state loaded from Somnia. Activity history restored.',
-          timestamp: Date.now(),
-        });
-      }
-
-      const sorted = deduped.sort((a, b) => b.timestamp - a.timestamp).slice(0, 50);
-      persistEvents(sorted, address);
-      return sorted;
-    });
-  }, [address, isConnected, loadStoredEvents, persistEvents]);
-
-  // 3. Anchor on-chain active vault position so even on a fresh browser it appears in activity
-  useEffect(() => {
-    if (!address || !vaultPosition) return;
-    if (vaultPosition.collateralWETH > 0 || vaultPosition.debtUSDC > 0) {
-      const posId = `pos-anchor-${address.toLowerCase()}`;
-      setEvents((prev) => {
-        const existing = prev.find((e) => e.id === posId);
-        if (existing) return prev;
-
-        const posEvent: ProtocolEvent = {
-          id: posId,
-          type: 'DEPOSIT',
-          title: `🏦 Active Vault: ${vaultPosition.collateralWETH.toFixed(2)} WETH Collateral`,
-          description: `On-chain debt: $${vaultPosition.debtUSDC.toFixed(2)} tUSDC · Health Factor: ${vaultPosition.healthFactor.toFixed(2)}`,
-          timestamp: Date.now() - 45000,
-        };
-
-        const updated = [posEvent, ...prev].slice(0, 50);
-        persistEvents(updated, address);
-        return updated;
-      });
-    }
-  }, [address, vaultPosition, persistEvents]);
-
-  // ── Stream real hedge history from Sentinel daemon ────────────────────────
-  const fetchHedgeHistory = useCallback(async () => {
-    try {
-      const resp = await fetch(`${DAEMON_URL}/api/history`);
-      if (!resp.ok) return;
-      const data = await resp.json();
-      if (Array.isArray(data.history) && data.history.length > 0) {
-        // history is sorted by createdAt DESC (newest at index 0)
-        const latestCompleted = data.history.find(
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (h: any) => h.status === 'COMPLETED' || (h.payoutUSDC && Number(h.payoutUSDC) > 0)
-        );
-        if (latestCompleted && Number(latestCompleted.payoutUSDC) > 0) {
-          setDaemonLastPayout(Number(latestCompleted.payoutUSDC));
-        }
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const totalPayout = data.history.reduce((sum: number, h: any) => {
-          if (h.status === 'COMPLETED' || (h.payoutUSDC && Number(h.payoutUSDC) > 0)) {
-            return sum + (Number(h.payoutUSDC) || 0);
-          }
-          return sum;
-        }, 0);
-        if (totalPayout > 0) {
-          setTotalHedgePayouts(totalPayout);
-        }
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const hedgeEvents: ProtocolEvent[] = data.history.flatMap((h: any) => {
-          const evts: ProtocolEvent[] = [];
-          if (h.status === 'SETTLED' || h.status === 'COMPLETED' || h.payoutUSDC > 0) {
-            evts.push({
-              id: `hedge-settled-${h.id}`,
-              type: 'HEDGE_SETTLED' as const,
-              title: `✅ Micro-Hedge Settled: +$${Number(h.payoutUSDC)?.toFixed(2)} tUSDC`,
-              description: `Debt repaid into LendingPool. HF restored to ${h.newHealthFactor?.toFixed(2) || 'Safe'}`,
-              timestamp: h.completedAt || h.createdAt,
-              txHash: h.txHash,
-            });
-          }
-          evts.push({
-            id: `hedge-triggered-${h.id}`,
-            type: 'HEDGE_TRIGGERED' as const,
-            title: `🚨 Micro-Hedge Triggered (HF: ${Number(h.triggerHf)?.toFixed(2)})`,
-            description: `Placed DOWN order on DreamDEX CLOB (Size: $${Number(h.hedgeSizeUSDC)?.toFixed(2)})`,
-            timestamp: h.createdAt,
-            txHash: h.txHash,
-          });
-          return evts;
-        });
-
-        setEvents((prev) => {
-          const existingIds = new Set(prev.map((e) => e.id));
-          const newEvents = hedgeEvents.filter((e) => !existingIds.has(e.id));
-          if (newEvents.length === 0) return prev;
-          const updated = [...newEvents, ...prev].slice(0, 50);
-          persistEvents(updated, address);
-          return updated;
-        });
-      }
-    } catch (_) {}
-  }, [address, persistEvents]);
-
-  useEffect(() => {
-    fetchHedgeHistory();
-    const interval = setInterval(fetchHedgeHistory, 1200);
-    return () => clearInterval(interval);
-  }, [fetchHedgeHistory]);
-
-  const addEvent = useCallback((event: Omit<ProtocolEvent, 'id' | 'timestamp'>) => {
-    setEvents((prev) => {
-      const newEvt: ProtocolEvent = {
-        ...event,
-        id: `evt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        timestamp: Date.now(),
-      };
-      const updated = [newEvt, ...prev].slice(0, 50);
-      persistEvents(updated, address);
-      return updated;
-    });
-  }, [address, persistEvents]);
-
+  }, []);
 
   const scrollToVault = () => {
     const el = document.getElementById('vault-terminal') || vaultSectionRef.current;
@@ -356,93 +191,74 @@ export default function Home() {
     }
   };
 
-  // Log txStep changes as activity events
+  // Refresh on-chain activity after confirmed transactions
   useEffect(() => {
     if (txStep === 'success' && lastTxHash) {
-      addEvent({
-        type: 'DEPOSIT',
-        title: '✅ On-chain Transaction Confirmed',
-        description: `tx: ${lastTxHash.slice(0, 12)}…${lastTxHash.slice(-6)}`,
-        txHash: lastTxHash,
-      });
-      // Auto-reset txStep banner after 4s
+      setTimeout(() => { refetchAll(); refreshActivity(); }, 1000);
       setTimeout(() => resetTx(), 4000);
-      // Refetch position
-      setTimeout(() => { refetchAll(); fetchHedgeHistory(); }, 1000);
     }
     if (txStep === 'error' && txError) {
-      addEvent({ type: 'WITHDRAW', title: '❌ Transaction Failed', description: txError });
+      addEvent({ type: lastAction, title: `❌ ${lastAction} Failed`, description: txError, source: 'LOCAL' });
       setTimeout(() => resetTx(), 5000);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [txStep]);
 
   // ── Deposit handler: approve WETH + depositAndBorrow atomically ──────────
-  // Vault's depositAndBorrow(collateralAmount, borrowAmount):
-  //   - pulls WETH from user → supplies to lending pool
-  //   - borrows tUSDC from lending pool at 45% LTV → sends to user
+  // Uses target HF ~1.40 formula to compute borrow amount (via shared suggestedBorrowUSDC)
+  // Contract MAX_BORROW_LTV = 7500 (75%)
   const handleDeposit = async (amount: number) => {
-    const ethPriceForCalc = currentEthPrice > 0 ? currentEthPrice : 2000;
-    const borrowUSDC = Math.floor(amount * ethPriceForCalc * 0.45);
+    setLastAction('DEPOSIT');
+    const ethPriceForCalc = liveOraclePrice > 0 ? liveOraclePrice : 2000;
+    const borrowUSDC = suggestedBorrowUSDC(amount, ethPriceForCalc);
     const hash = await depositAndBorrow(amount, borrowUSDC);
     if (hash) {
-      addEvent({
-        type: 'DEPOSIT',
-        title: `+${amount} WETH Supplied + ${borrowUSDC} tUSDC Borrowed`,
-        description: `Approved WETH, deposited to vault, borrowed ${borrowUSDC} tUSDC at 45% LTV.`,
-        txHash: hash,
-      });
+      setTimeout(() => refreshActivity(), 1500);
     }
   };
 
   // ── Withdraw handler (real wagmi tx) ─────────────────────────────────────
   const handleWithdraw = async (amount: number) => {
+    setLastAction('WITHDRAW');
     const hash = await withdraw(amount);
     if (hash) {
-      addEvent({
-        type: 'WITHDRAW',
-        title: `${amount} WETH Withdrawn`,
-        description: 'Collateral returned to wallet.',
-        txHash: hash,
-      });
+      setTimeout(() => refreshActivity(), 1500);
     }
   };
 
   // ── Borrow more handler ───────────────────────────────────────────────────
   const handleBorrow = async (amount: number) => {
+    setLastAction('BORROW');
     const hash = await borrow(amount);
     if (hash) {
-      addEvent({
-        type: 'DEPOSIT',
-        title: `Borrowed ${amount} tUSDC`,
-        description: `Additional tUSDC borrowed against existing collateral.`,
-        txHash: hash,
-      });
+      setTimeout(() => refreshActivity(), 1500);
     }
   };
 
   // ── Faucet handler (real wagmi mint txs) ─────────────────────────────────
   const handleMintTokens = async () => {
+    setLastAction('FAUCET');
     await mintTokens();
     addEvent({
-      type: 'DEPOSIT',
+      type: 'FAUCET',
       title: 'Faucet: Minting 10 WETH + 10,000 tUSDC',
       description: 'Signed mint transactions on Somnia testnet.',
+      source: 'ON-CHAIN',
     });
   };
 
+
   // ── Crash Simulator handler ───────────────────────────────────────────────
-  // - Calls daemon /api/simulate-crash (daemon updates MockPriceOracle.setPrice() on-chain)
-  // - Daemon checks all vaults, triggers DreamDEX DOWN hedge, and executes on-chain repayment
   const handleSimulateDrop = async (dropPercentage: number) => {
     setIsSimulating(true);
-    const newPrice = baseEthPrice * (1 - dropPercentage / 100);
+    const newPrice = BASE_ETH_PRICE * (1 - dropPercentage / 100);
     setCurrentEthPrice(newPrice);
-    setLiveOraclePrice(newPrice); // ← show real crashed price immediately
+    setLiveOraclePrice(newPrice);
     addEvent({
       type: 'PRICE_DROP',
       title: `Market Crash Simulated: -${dropPercentage}%`,
-      description: `ETH/USD oracle → $${newPrice.toLocaleString()} (via Sentinel daemon)`,
+      description: `ETH/USD oracle → $${newPrice.toLocaleString()} (via Sentinel daemon → on-chain MockPriceOracle)`,
+      source: 'DAEMON',
     });
 
     try {
@@ -458,17 +274,18 @@ export default function Home() {
           title: '⛓ Oracle price updated on-chain',
           description: `MockPriceOracle.setPrice → tx ${data.onChainTxHash.slice(0, 14)}…`,
           txHash: data.onChainTxHash,
+          source: 'ON-CHAIN',
         });
       }
 
-      // Immediately refetch contract state to reflect dropped oracle price
       await refetchAll();
-      fetchHedgeHistory();
+      refreshActivity();
     } catch {
       addEvent({
         type: 'PRICE_DROP',
         title: 'ℹ️ Daemon offline — price simulated locally',
         description: 'Start daemon: npm run dev:daemon',
+        source: 'LOCAL',
       });
     }
 
@@ -479,31 +296,25 @@ export default function Home() {
         : 2.5;
 
     if (newHF < 1.30) {
-      setIsHedgingActive(true);
       addEvent({
         type: 'HEDGE_TRIGGERED',
         title: `🚨 HF Critical (${newHF.toFixed(2)}) — Sentinel Triggered`,
         description: 'Submitting Immediate-or-Cancel (IOC) DOWN hedge on DreamDEX CLOB…',
+        source: 'DAEMON',
       });
 
-      // Rapidly poll to catch the on-chain hedge execution as fast as it mines (<1s)
-      setTimeout(() => { refetchAll(); fetchHedgeHistory(); }, 400);
-      setTimeout(() => { refetchAll(); fetchHedgeHistory(); }, 1200);
-      setTimeout(() => { refetchAll(); fetchHedgeHistory(); }, 2500);
-      setTimeout(() => {
-        refetchAll();
-        fetchHedgeHistory();
-        setIsHedgingActive(false);
-      }, 5000);
+      setTimeout(() => { refetchAll(); refreshActivity(); }, 400);
+      setTimeout(() => { refetchAll(); refreshActivity(); }, 1200);
+      setTimeout(() => { refetchAll(); refreshActivity(); }, 2500);
+      setTimeout(() => { refetchAll(); refreshActivity(); }, 5000);
     }
 
     setTimeout(() => setIsSimulating(false), 400);
   };
 
   const handleResetPrice = async () => {
-    setCurrentEthPrice(baseEthPrice);
-    setLiveOraclePrice(baseEthPrice); // ← show $2000 immediately
-    setIsHedgingActive(false);
+    setCurrentEthPrice(BASE_ETH_PRICE);
+    setLiveOraclePrice(BASE_ETH_PRICE);
     try {
       await fetch(`${DAEMON_URL}/api/reset`, { method: 'POST' });
     } catch (_) {}
@@ -511,16 +322,15 @@ export default function Home() {
       type: 'PRICE_RESET',
       title: 'Oracle Reset to $2,000',
       description: 'Daemon reset: on-chain price and vault states normalized.',
+      source: 'DAEMON',
     });
     setTimeout(() => {
       refetchAll();
-      fetchHedgeHistory();
+      refreshActivity();
     }, 1200);
   };
 
   if (!mounted) return null;
-
-
 
   const explorerBase = 'https://shannon-explorer.somnia.network/tx';
 
@@ -578,7 +388,7 @@ export default function Home() {
 
         {/* SECTION 2: Telemetry Ticker */}
         <div className="w-full bg-black/30 backdrop-blur-xl border-y border-white/[0.06]">
-          <LiveTelemetryTicker />
+          <LiveTelemetryTicker daemonStatus={daemonStatus} />
         </div>
 
         {/* SECTION 3: Ecosystem Bento */}
@@ -600,10 +410,20 @@ export default function Home() {
                 <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-purple-950/70 border border-purple-500/30 text-xs font-semibold text-pink-300 mb-2">
                   <span className="w-2 h-2 rounded-full bg-pink-500 animate-ping" />
                   <span>Live On-Chain Terminal</span>
+                  {daemonStatus.online && (
+                    <span className="ml-1 px-1.5 py-0.5 rounded text-[8px] font-bold bg-cyan-950/60 text-cyan-300 border border-cyan-500/30 font-mono uppercase">
+                      DAEMON {daemonStatus.dreamdexMode.toUpperCase()}
+                    </span>
+                  )}
                 </div>
-                <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-                  LiquiGuard <span className="text-gradient-purple">Vault Command Center</span>
-                </h2>
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl overflow-hidden border border-purple-500/40 p-0.5 bg-purple-950/60 shadow-[0_0_16px_rgba(236,72,153,0.35)] shrink-0 hidden sm:flex items-center justify-center">
+                    <img src="/logo.png" alt="LiquiGuard Logo" className="w-full h-full object-cover rounded-[10px]" />
+                  </div>
+                  <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+                    LiquiGuard <span className="text-gradient-purple">Vault Command Center</span>
+                  </h2>
+                </div>
                 <p className="text-xs text-purple-300/70 mt-1">
                   {isConnected && address
                     ? `Connected: ${address.slice(0, 6)}…${address.slice(-4)} · All actions send real MetaMask transactions to Somnia.`
@@ -611,7 +431,7 @@ export default function Home() {
                 </p>
               </div>
               <div className="text-xs text-purple-300/80 font-mono flex items-center gap-3">
-                <span>Oracle: <strong className="text-cyan-300">${currentEthPrice.toLocaleString()}</strong></span>
+                <span>Oracle: <strong className="text-cyan-300">${liveOraclePrice.toLocaleString()}</strong></span>
                 <span>•</span>
                 <span>HF: <strong className={effectiveHF < 1.3 ? 'text-red-400' : effectiveHF < 1.5 ? 'text-yellow-400' : 'text-emerald-400'}>{effectiveHF.toFixed(2)}</strong></span>
               </div>
@@ -648,6 +468,7 @@ export default function Home() {
                   collateralETH={depositedWETH}
                   ethPrice={currentEthPrice}
                   liquidationPrice={liquidationPrice}
+                  priceIsSimulated={priceIsSimulated}
                 />
               </div>
               <div className="h-full">
@@ -659,6 +480,7 @@ export default function Home() {
                   isSimulating={isSimulating}
                   depositedWETH={depositedWETH}
                   borrowedUSDC={borrowedUSDC}
+                  daemonVaultStatus={daemonVaultStatus}
                 />
               </div>
               <div className="h-full">
@@ -672,12 +494,14 @@ export default function Home() {
               <div className="h-full">
                 <OrderBookVisualizer
                   currentEthPrice={currentEthPrice}
-                  strikePrice={baseEthPrice}
+                  strikePrice={defaultMarket?.strikePrice ?? BASE_ETH_PRICE}
                   isHedging={isHedgingActive}
+                  market={defaultMarket}
+                  mode={dreamdexMode}
                 />
               </div>
               <div className="h-full">
-                <ActivityLog events={events} />
+                <ActivityLog events={events} isConnected={isConnected} />
               </div>
             </div>
           </div>

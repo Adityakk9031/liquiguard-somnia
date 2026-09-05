@@ -1,9 +1,11 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { HedgeStatus } from '@/types';
-import { ShieldCheck, Zap, RefreshCw, CheckCircle2, TrendingDown } from 'lucide-react';
+import { ShieldCheck, Zap, CheckCircle2, TrendingDown } from 'lucide-react';
 import { formatUSD } from '@/lib/utils';
+import { useSomniaRpc } from '@/hooks/useSomniaRpc';
+import { DataSourceBadge, StatusChip, CardChipRow } from '@/lib/dataSource';
 
 interface HedgeStatusBadgeProps {
   status: HedgeStatus;
@@ -19,65 +21,39 @@ export function HedgeStatusBadge({
   isHedging,
 }: HedgeStatusBadgeProps) {
   const effectiveStatus = isHedging ? HedgeStatus.HEDGING : status;
-
-  // Measure real RPC round-trip latency to Somnia node
-  const [latencyMs, setLatencyMs] = useState<number | null>(null);
-
-  useEffect(() => {
-    const measureLatency = async () => {
-      try {
-        const t0 = performance.now();
-        await fetch('https://dream-rpc.somnia.network', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ jsonrpc: '2.0', method: 'eth_blockNumber', params: [], id: 1 }),
-        });
-        const ms = Math.round(performance.now() - t0);
-        setLatencyMs(ms);
-      } catch {
-        setLatencyMs(null);
-      }
-    };
-    measureLatency();
-    const iv = setInterval(measureLatency, 5000);
-    return () => clearInterval(iv);
-  }, []);
+  const { latencyMs } = useSomniaRpc(); // shared — no duplicate fetch
 
   return (
     <div className="rounded-2xl glass-panel p-5 flex flex-col justify-between h-full border border-purple-500/25">
       {/* Header */}
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-lg bg-purple-950/80 border border-purple-500/30">
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <div className="flex items-start gap-2 min-w-0">
+          <div className="p-1.5 rounded-lg bg-purple-950/80 border border-purple-500/30 shrink-0 mt-0.5">
             <Zap className="w-4 h-4 text-amber-400" />
           </div>
           <div>
-            <h4 className="text-sm font-bold text-white tracking-tight">Sentinel Guard</h4>
+            <h4 className="text-sm font-bold text-white tracking-tight leading-snug">Sentinel Guard</h4>
             <p className="text-[10px] text-purple-300/70">DreamDEX Automated Hedging</p>
           </div>
         </div>
 
-        {/* Dynamic Badge */}
-        {effectiveStatus === HedgeStatus.IDLE && (
-          <div className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950/60 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span>IDLE (SAFE)</span>
-          </div>
-        )}
-
-        {effectiveStatus === HedgeStatus.HEDGING && (
-          <div className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-950/70 text-amber-300 border border-amber-500/50 flex items-center gap-1 animate-pulse">
-            <RefreshCw className="w-3 h-3 animate-spin text-amber-400" />
-            <span>HEDGING</span>
-          </div>
-        )}
-
-        {effectiveStatus === HedgeStatus.PROTECTED && (
-          <div className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-cyan-950/70 text-cyan-300 border border-cyan-500/50 flex items-center gap-1">
-            <CheckCircle2 className="w-3 h-3 text-cyan-400" />
-            <span>PROTECTED</span>
-          </div>
-        )}
+        <CardChipRow>
+          <DataSourceBadge source="LIVE_DAEMON" />
+          {effectiveStatus === HedgeStatus.IDLE && (
+            <StatusChip tone="emerald">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+              IDLE SAFE
+            </StatusChip>
+          )}
+          {effectiveStatus === HedgeStatus.HEDGING && (
+            <StatusChip tone="amber" pulse>
+              HEDGING
+            </StatusChip>
+          )}
+          {effectiveStatus === HedgeStatus.PROTECTED && (
+            <StatusChip tone="cyan">PROTECTED</StatusChip>
+          )}
+        </CardChipRow>
       </div>
 
       {/* State Box */}
@@ -110,7 +86,7 @@ export function HedgeStatusBadge({
           <div>
             <div className="flex items-center gap-1.5 text-cyan-300 font-semibold text-xs">
               <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Micro-Hedge Settled & Repaid!</span>
+              <span>Micro-Hedge Settled &amp; Repaid!</span>
             </div>
             <p className="text-[11px] text-purple-200/70 mt-1">
               Settlement payout was injected into MockLendingPool.repay(). Health factor rebounded!
@@ -129,7 +105,7 @@ export function HedgeStatusBadge({
         </div>
 
         <div className="p-2 rounded-lg bg-purple-950/30 border border-purple-500/20 text-center">
-          <div className="text-[9px] text-purple-300/70">Somnia Latency:</div>
+          <div className="text-[9px] text-purple-300/70">RPC Latency:</div>
           <div className={`text-xs sm:text-sm font-mono font-bold ${
             latencyMs === null ? 'text-purple-400' :
             latencyMs < 150 ? 'text-cyan-300' :

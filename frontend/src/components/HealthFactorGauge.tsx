@@ -1,8 +1,8 @@
 'use client';
 
-import { Shield, ShieldAlert, ShieldCheck, AlertTriangle } from 'lucide-react';
-import { formatUSD, formatMetricUSD, getHealthFactorColor, getHealthFactorStatus } from '@/lib/utils';
-
+import { Shield } from 'lucide-react';
+import { formatUSD, formatMetricUSD, getHealthFactorStatus } from '@/lib/utils';
+import { DataSourceBadge, StatusChip, CardChipRow } from '@/lib/dataSource';
 
 
 interface HealthFactorGaugeProps {
@@ -12,6 +12,7 @@ interface HealthFactorGaugeProps {
   collateralETH: number;
   ethPrice: number;
   liquidationPrice: number;
+  priceIsSimulated?: boolean;
 }
 
 export function HealthFactorGauge({
@@ -21,6 +22,7 @@ export function HealthFactorGauge({
   collateralETH,
   ethPrice,
   liquidationPrice,
+  priceIsSimulated = false,
 }: HealthFactorGaugeProps) {
   const minHF = 0.5;
   const maxHF = 2.5;
@@ -32,8 +34,6 @@ export function HealthFactorGauge({
   const circumference = Math.PI * radius;
   const strokeDashoffset = circumference - (percentage / 100) * circumference;
 
-  const status = getHealthFactorStatus(healthFactor);
-
   const getGradientId = () => {
     if (healthFactor >= 1.5) return 'gauge-emerald';
     if (healthFactor >= 1.3) return 'gauge-amber';
@@ -43,37 +43,28 @@ export function HealthFactorGauge({
   return (
     <div className="rounded-2xl glass-panel-glow p-5 flex flex-col justify-between h-full border border-purple-500/25">
       {/* Header */}
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-lg bg-purple-950/80 border border-purple-500/30">
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <div className="flex items-start gap-2 min-w-0">
+          <div className="p-1.5 rounded-lg bg-purple-950/80 border border-purple-500/30 shrink-0 mt-0.5">
             <Shield className="w-4 h-4 text-pink-400" />
           </div>
           <div>
-            <h3 className="text-sm font-bold text-white tracking-tight">Vault Health Factor</h3>
+            <h3 className="text-sm font-bold text-white tracking-tight leading-snug">Vault Health Factor</h3>
             <p className="text-[10px] text-purple-300/70">Somnia Sentinel Guard</p>
           </div>
         </div>
 
-        {/* Status Chip */}
-        <div
-          className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 border ${
-            healthFactor >= 1.5
-              ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40'
-              : healthFactor >= 1.3
-              ? 'bg-amber-950/60 text-amber-300 border-amber-500/40'
-              : 'bg-rose-950/70 text-rose-300 border-rose-500/60 animate-pulse'
-          }`}
-        >
-          {healthFactor >= 1.5 ? (
-            <ShieldCheck className="w-3 h-3" />
-          ) : healthFactor >= 1.3 ? (
-            <AlertTriangle className="w-3 h-3" />
-          ) : (
-            <ShieldAlert className="w-3 h-3" />
-          )}
-          <span>{status}</span>
-        </div>
+        <CardChipRow>
+          <DataSourceBadge source={priceIsSimulated ? 'SIMULATED' : 'LIVE_ONCHAIN'} />
+          <StatusChip
+            tone={healthFactor >= 1.5 ? 'emerald' : healthFactor >= 1.3 ? 'amber' : 'rose'}
+            pulse={healthFactor < 1.3}
+          >
+            {priceIsSimulated ? 'LOCAL EST.' : getHealthFactorStatus(healthFactor)}
+          </StatusChip>
+        </CardChipRow>
       </div>
+
 
       {/* SVG Radial Gauge */}
       <div className="relative flex flex-col items-center justify-center my-2">

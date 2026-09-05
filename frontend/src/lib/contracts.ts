@@ -237,7 +237,10 @@ export const LIQUIGUARD_VAULT_ABI = [
   },
 ] as const;
 
-// ─── MockPriceOracle ABI (matches deployed MockPriceOracle.sol) ───────────
+// ─── MockPriceOracle ABI (matches deployed MockPriceOracle.sol exactly) ──────
+// Functions: getLatestPrice → (uint256 price, uint256 timestamp)
+//            setPrice(uint256)  — Chainlink 8-decimal units, public for demo simulation
+//            decimals() → 8
 export const MOCK_PRICE_ORACLE_ABI = [
   {
     type: 'function',
@@ -251,32 +254,8 @@ export const MOCK_PRICE_ORACLE_ABI = [
   },
   {
     type: 'function',
-    name: 'getETHPrice',
-    inputs: [],
-    outputs: [{ name: '', type: 'uint256' }],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
-    name: 'setETHPrice',
-    inputs: [{ name: 'price', type: 'uint256' }],
-    outputs: [],
-    stateMutability: 'nonpayable',
-  },
-  {
-    type: 'function',
-    name: 'getAssetPrice',
-    inputs: [{ name: 'asset', type: 'address' }],
-    outputs: [{ name: '', type: 'uint256' }],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
-    name: 'setAssetPrice',
-    inputs: [
-      { name: 'asset', type: 'address' },
-      { name: 'price', type: 'uint256' },
-    ],
+    name: 'setPrice',
+    inputs: [{ name: 'newPrice', type: 'uint256' }],
     outputs: [],
     stateMutability: 'nonpayable',
   },
@@ -288,6 +267,7 @@ export const MOCK_PRICE_ORACLE_ABI = [
     stateMutability: 'pure',
   },
 ] as const;
+
 
 // ─── MockLendingPool ABI (matches deployed MockLendingPool.sol) ───────────
 export const MOCK_LENDING_POOL_ABI = [
