@@ -43,17 +43,16 @@ export function HealthFactorGauge({
   return (
     <div className="rounded-2xl glass-panel-glow p-5 flex flex-col justify-between h-full border border-purple-500/25">
       {/* Header */}
-      <div className="flex items-start justify-between gap-2 mb-2">
-        <div className="flex items-start gap-2 min-w-0">
-          <div className="p-1.5 rounded-lg bg-purple-950/80 border border-purple-500/30 shrink-0 mt-0.5">
+      <div className="flex flex-col gap-1.5 mb-2">
+        <div className="flex items-center gap-2">
+          <div className="p-1.5 rounded-lg bg-purple-950/80 border border-purple-500/30 shrink-0">
             <Shield className="w-4 h-4 text-pink-400" />
           </div>
-          <div>
-            <h3 className="text-sm font-bold text-white tracking-tight leading-snug">Vault Health Factor</h3>
+          <div className="min-w-0">
+            <h3 className="text-sm font-bold text-white tracking-tight leading-snug whitespace-nowrap">Vault Health Factor</h3>
             <p className="text-[10px] text-purple-300/70">Somnia Sentinel Guard</p>
           </div>
         </div>
-
         <CardChipRow>
           <DataSourceBadge source={priceIsSimulated ? 'SIMULATED' : 'LIVE_ONCHAIN'} />
           <StatusChip
