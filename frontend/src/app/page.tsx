@@ -480,7 +480,7 @@ export default function Home() {
                   tusdcBalance={tusdcBalance}
                   depositedWETH={depositedWETH}
                   borrowedUSDC={borrowedUSDC}
-                  ethPrice={liveOraclePrice}
+                  ethPrice={currentEthPrice > 0 ? currentEthPrice : BASE_ETH_PRICE}
                   onDeposit={handleDeposit}
                   onWithdraw={handleWithdraw}
                   onBorrow={handleBorrow}

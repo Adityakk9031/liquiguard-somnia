@@ -37,19 +37,22 @@ export function VaultControls({
   const [withdrawAmount, setWithdrawAmount] = useState<string>('0.5');
   const [forceUnsafeWithdraw, setForceUnsafeWithdraw] = useState<boolean>(false);
 
+  // Guard: never compute on zero price (oracle not loaded yet)
+  const safePrice = ethPrice > 0 ? ethPrice : 2000;
+
   // Current HF calculation
   const currentHF = depositedWETH > 0 && borrowedUSDC > 0
-    ? (depositedWETH * ethPrice * 0.80) / borrowedUSDC
+    ? (depositedWETH * safePrice * 0.80) / borrowedUSDC
     : 999;
 
   // Maximum borrow capacity supported by on-chain LiquiGuardVault (MAX_BORROW_LTV = 75%)
-  const maxBorrowUSD = depositedWETH * ethPrice * 0.75; // 75% on-chain LTV cap
+  const maxBorrowUSD = depositedWETH * safePrice * 0.75; // 75% on-chain LTV cap
   const remainingBorrow = Math.max(0, maxBorrowUSD - borrowedUSDC);
 
   // Target debt to bring HF down to ~1.40 (so a -35% crash cleanly triggers Sentinel at < 1.30)
   // HF = col * price * 0.80 / debt = 1.40 → targetDebt = col * price * 0.80 / 1.40
   const targetDebtForTrigger = depositedWETH > 0
-    ? (depositedWETH * ethPrice * 0.80) / 1.40
+    ? (depositedWETH * safePrice * 0.80) / 1.40
     : 0;
 
   // Amount needed to reach 1.40 HF, capped by contract's remaining borrow capacity
@@ -78,7 +81,7 @@ export function VaultControls({
   const projectedHFAfterBorrow = (() => {
     const newDebt = borrowedUSDC + (parseFloat(borrowAmount) || 0);
     if (depositedWETH > 0 && newDebt > 0) {
-      return (depositedWETH * ethPrice * 0.80) / newDebt;
+      return (depositedWETH * safePrice * 0.80) / newDebt;
     }
     return null;
   })();
