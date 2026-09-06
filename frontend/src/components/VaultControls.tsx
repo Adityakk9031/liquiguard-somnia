@@ -69,7 +69,9 @@ export function VaultControls({
   const handleBorrowSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const num = parseFloat(borrowAmount);
-    if (!isNaN(num) && num > 0) onBorrow(num);
+    if (isNaN(num) || num <= 0) return;
+    if (num > remainingBorrow) return;
+    onBorrow(num);
   };
 
   const handleWithdrawSubmit = (e: React.FormEvent) => {
@@ -78,13 +80,16 @@ export function VaultControls({
     if (!isNaN(num) && num > 0) onWithdraw(num);
   };
 
+  const borrowNum = parseFloat(borrowAmount) || 0;
   const projectedHFAfterBorrow = (() => {
-    const newDebt = borrowedUSDC + (parseFloat(borrowAmount) || 0);
+    const newDebt = borrowedUSDC + borrowNum;
     if (depositedWETH > 0 && newDebt > 0) {
       return (depositedWETH * safePrice * 0.80) / newDebt;
     }
     return null;
   })();
+  const exceedsMaxLtv = borrowNum > 0 && borrowNum - remainingBorrow > 0.0001;
+  const borrowBlocked = depositedWETH === 0 || remainingBorrow <= 0 || exceedsMaxLtv || borrowNum <= 0;
 
   return (
     <div className="rounded-2xl glass-panel p-5 flex flex-col justify-between h-full border border-purple-500/25">
@@ -261,21 +266,31 @@ export function VaultControls({
                     type="number"
                     step="1"
                     min="1"
+                    max={Math.max(0, Math.floor(remainingBorrow))}
                     value={borrowAmount}
                     onChange={(e) => setBorrowAmount(e.target.value)}
-                    className="w-full bg-purple-950/60 border border-purple-500/30 rounded-xl py-2.5 px-3.5 pr-16 text-lg font-bold text-white focus:outline-none focus:border-pink-500"
+                    className={`w-full bg-purple-950/60 border rounded-xl py-2.5 px-3.5 pr-16 text-lg font-bold text-white focus:outline-none transition-colors ${
+                      exceedsMaxLtv
+                        ? 'border-red-500/70 focus:border-red-400 text-red-200'
+                        : 'border-purple-500/30 focus:border-pink-500'
+                    }`}
                     placeholder="Amount in tUSDC"
                   />
                   <button
                     type="button"
+                    disabled={remainingBorrow < 1}
                     onClick={() => setBorrowAmount(Math.floor(remainingBorrow).toString())}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 text-[10px] font-bold text-purple-200"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 text-[10px] font-bold text-purple-200 disabled:opacity-40"
                   >
                     MAX
                   </button>
                 </div>
 
-                <div className="p-2.5 rounded-xl bg-purple-950/40 border border-purple-500/20 space-y-1 text-xs text-purple-200/80">
+                <div className={`p-2.5 rounded-xl border space-y-1 text-xs ${
+                  exceedsMaxLtv
+                    ? 'bg-red-950/50 border-red-500/50 text-red-200'
+                    : 'bg-purple-950/40 border-purple-500/20 text-purple-200/80'
+                }`}>
                   <div className="flex justify-between">
                     <span>Current Debt:</span>
                     <strong className="text-white">${borrowedUSDC.toFixed(2)} tUSDC</strong>
@@ -285,9 +300,9 @@ export function VaultControls({
                     <strong className="text-emerald-300">${remainingBorrow.toFixed(0)} tUSDC</strong>
                   </div>
                   <div className="flex justify-between pt-0.5 border-t border-purple-500/20">
-                    <span>{parseFloat(borrowAmount) > 0 ? 'Projected HF after borrow:' : 'Current Health Factor:'}</span>
+                    <span>{borrowNum > 0 ? 'Projected HF after borrow:' : 'Current Health Factor:'}</span>
                     <strong className={
-                      (projectedHFAfterBorrow ?? currentHF) < 1.30
+                      exceedsMaxLtv || (projectedHFAfterBorrow ?? currentHF) < 1.30
                         ? 'text-red-400'
                         : (projectedHFAfterBorrow ?? currentHF) < 2.0
                         ? 'text-yellow-400'
@@ -296,6 +311,14 @@ export function VaultControls({
                       {(projectedHFAfterBorrow ?? currentHF).toFixed(2)}
                     </strong>
                   </div>
+                  {exceedsMaxLtv && (
+                    <div className="text-red-300 text-[10px] leading-relaxed pt-1 border-t border-red-500/30">
+                      ⛔ <strong>Safety Guard Active:</strong> This borrow exceeds the vault&apos;s <strong>75% LTV cap</strong>
+                      {projectedHFAfterBorrow !== null ? ` (projected HF ${projectedHFAfterBorrow.toFixed(2)})` : ''}.
+                      The contract will reject it. Max remaining: <strong>${Math.floor(remainingBorrow)} tUSDC</strong>
+                      {' '}(HF stays ≥ ~1.07).
+                    </div>
+                  )}
                 </div>
               </>
             )}
@@ -303,11 +326,19 @@ export function VaultControls({
 
             <button
               type="submit"
-              disabled={isLoading || depositedWETH === 0 || !borrowAmount}
-              className="w-full glow-btn-primary py-2.5 rounded-xl font-bold text-white text-xs flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 mt-2"
+              disabled={isLoading || borrowBlocked}
+              className={`w-full py-2.5 rounded-xl font-bold text-white text-xs flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 mt-2 ${
+                exceedsMaxLtv ? 'bg-red-900/60 border border-red-500/50 text-red-200' : 'glow-btn-primary'
+              }`}
             >
               <Wallet className="w-4 h-4 text-pink-300" />
-              <span>Borrow tUSDC</span>
+              <span>
+                {exceedsMaxLtv
+                  ? '⛔ Blocked: Over 75% LTV'
+                  : remainingBorrow <= 0 && depositedWETH > 0
+                    ? '⛔ Max LTV reached'
+                    : 'Borrow tUSDC'}
+              </span>
             </button>
           </form>
         )}
